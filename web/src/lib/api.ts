@@ -1,5 +1,6 @@
 export type SessionMode = "demo" | "live";
 export type PartyRole = "hirer" | "worker";
+export type LanguageCode = "en" | "hi";
 export type ConsentStatus = "pending" | "accepted" | "declined";
 export type TermStatus = "confirmed" | "conflict" | "missing";
 export type SessionStage =
@@ -14,16 +15,22 @@ export type SessionStage =
 
 export interface TranscriptTurn {
   id: string;
+  session_id: string;
+  participant_id: PartyRole;
   speaker: PartyRole;
   speaker_name: string;
-  language: "en" | "hi" | "hinglish";
-  text: string;
+  original_text: string;
+  original_language: LanguageCode;
+  timestamp: string;
+  translations: Partial<Record<LanguageCode, string>>;
 }
 
 export interface EvidenceReference {
   source: "transcript" | "clarification";
   reference_id: string;
-  excerpt: string;
+  participant_id: PartyRole;
+  message_id: string | null;
+  original_text: string;
 }
 
 export interface AgreementTerm {
@@ -32,6 +39,10 @@ export interface AgreementTerm {
   status: TermStatus;
   value: string | null;
   evidence: EvidenceReference[];
+  participant_confirmations: Record<
+    PartyRole,
+    "confirmed" | "conflicting" | "not_stated"
+  >;
 }
 
 export interface ClarificationQuestion {
@@ -45,7 +56,16 @@ export interface ClarificationAnswer {
   question_id: string;
   party: PartyRole;
   answer: string;
+  meaning: "included" | "charged_separately";
   submitted_at: string;
+}
+
+export interface SessionParticipant {
+  id: PartyRole;
+  role: PartyRole;
+  display_name: string;
+  language: LanguageCode;
+  requested_display_language: LanguageCode;
 }
 
 export interface PartyConfirmation {
@@ -60,6 +80,7 @@ export interface SessionView {
   mode: SessionMode;
   stage: SessionStage;
   created_at: string;
+  participants: SessionParticipant[];
   consent: Record<PartyRole, ConsentStatus>;
   transcript: TranscriptTurn[];
   terms: AgreementTerm[];
@@ -106,8 +127,16 @@ const sessionPath = (sessionId: string) =>
   `/api/v1/demo/sessions/${sessionId}`;
 
 export const api = {
-  createDemo: () =>
-    request<SessionView>("/api/v1/demo/sessions", { method: "POST" }),
+  createDemo: (
+    participantLanguages: Record<PartyRole, LanguageCode> = {
+      hirer: "en",
+      worker: "en",
+    },
+  ) =>
+    request<SessionView>("/api/v1/demo/sessions", {
+      method: "POST",
+      body: JSON.stringify({ participant_languages: participantLanguages }),
+    }),
   submitConsent: (sessionId: string, party: PartyRole, accepted = true) =>
     request<SessionView>(`${sessionPath(sessionId)}/consent`, {
       method: "POST",

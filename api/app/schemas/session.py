@@ -17,6 +17,11 @@ class PartyRole(StrEnum):
     WORKER = "worker"
 
 
+class LanguageCode(StrEnum):
+    ENGLISH = "en"
+    HINDI = "hi"
+
+
 class ConsentStatus(StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"
@@ -27,6 +32,17 @@ class TermStatus(StrEnum):
     CONFIRMED = "confirmed"
     CONFLICT = "conflict"
     MISSING = "missing"
+
+
+class ParticipantTermStatus(StrEnum):
+    CONFIRMED = "confirmed"
+    CONFLICTING = "conflicting"
+    NOT_STATED = "not_stated"
+
+
+class MaterialsPolicy(StrEnum):
+    INCLUDED = "included"
+    CHARGED_SEPARATELY = "charged_separately"
 
 
 class SessionStage(StrEnum):
@@ -40,18 +56,49 @@ class SessionStage(StrEnum):
     COMPLETED = "completed"
 
 
+class ParticipantLanguages(BaseModel):
+    hirer: LanguageCode = LanguageCode.ENGLISH
+    worker: LanguageCode = LanguageCode.ENGLISH
+
+
+class DemoSessionCreate(BaseModel):
+    participant_languages: ParticipantLanguages = Field(
+        default_factory=ParticipantLanguages
+    )
+
+
+class SessionParticipant(BaseModel):
+    id: PartyRole
+    role: PartyRole
+    display_name: str
+    language: LanguageCode
+    requested_display_language: LanguageCode
+
+
 class TranscriptTurn(BaseModel):
     id: str
+    session_id: str
+    participant_id: PartyRole
     speaker: PartyRole
     speaker_name: str
-    language: Literal["en", "hi", "hinglish"]
-    text: str
+    original_text: str
+    original_language: LanguageCode
+    timestamp: datetime
+    translations: dict[LanguageCode, str] = Field(default_factory=dict)
 
 
 class EvidenceReference(BaseModel):
     source: Literal["transcript", "clarification"]
     reference_id: str
-    excerpt: str
+    participant_id: PartyRole
+    message_id: str | None = None
+    original_text: str
+
+    @model_validator(mode="after")
+    def transcript_evidence_requires_message(self) -> EvidenceReference:
+        if self.source == "transcript" and not self.message_id:
+            raise ValueError("transcript evidence requires a supporting message ID")
+        return self
 
 
 class AgreementTerm(BaseModel):
@@ -60,9 +107,12 @@ class AgreementTerm(BaseModel):
     status: TermStatus
     value: str | None = None
     evidence: list[EvidenceReference] = Field(default_factory=list)
+    participant_confirmations: dict[PartyRole, ParticipantTermStatus]
 
     @model_validator(mode="after")
-    def require_evidence_for_non_missing_term(self) -> AgreementTerm:
+    def validate_provenance(self) -> AgreementTerm:
+        if set(self.participant_confirmations) != set(PartyRole):
+            raise ValueError("term status is required for both participants")
         if self.status != TermStatus.MISSING and not self.evidence:
             raise ValueError("non-missing agreement terms require evidence")
         if self.status == TermStatus.MISSING and self.evidence:
@@ -81,6 +131,7 @@ class ClarificationAnswer(BaseModel):
     question_id: str
     party: PartyRole
     answer: str
+    meaning: MaterialsPolicy
     submitted_at: datetime
 
 
@@ -129,6 +180,7 @@ class SessionView(BaseModel):
     mode: SessionMode
     stage: SessionStage
     created_at: datetime
+    participants: list[SessionParticipant]
     consent: dict[PartyRole, ConsentStatus]
     transcript: list[TranscriptTurn]
     terms: list[AgreementTerm]

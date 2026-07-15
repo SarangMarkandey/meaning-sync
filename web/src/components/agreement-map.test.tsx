@@ -9,14 +9,17 @@ const terms: AgreementTerm[] = [
     id: "scope",
     label: "Scope of work",
     status: "confirmed",
-    value: "Repair fan and two switches",
+    value: "Repair one fan and two switches",
     evidence: [
       {
         source: "transcript",
-        reference_id: "turn-1",
-        excerpt: "fan aur do switches",
+        reference_id: "message-1",
+        participant_id: "hirer",
+        message_id: "message-1",
+        original_text: "Repair the fan and two switches.",
       },
     ],
+    participant_confirmations: { hirer: "confirmed", worker: "confirmed" },
   },
   {
     id: "materials",
@@ -26,10 +29,13 @@ const terms: AgreementTerm[] = [
     evidence: [
       {
         source: "transcript",
-        reference_id: "turn-3",
-        excerpt: "parts included",
+        reference_id: "message-2",
+        participant_id: "worker",
+        message_id: "message-2",
+        original_text: "Replacement parts are separate.",
       },
     ],
+    participant_confirmations: { hirer: "conflicting", worker: "conflicting" },
   },
   {
     id: "completion",
@@ -37,6 +43,7 @@ const terms: AgreementTerm[] = [
     status: "missing",
     value: null,
     evidence: [],
+    participant_confirmations: { hirer: "not_stated", worker: "not_stated" },
   },
 ];
 
@@ -51,7 +58,16 @@ describe("AgreementMap", () => {
     expect(
       screen.getByRole("heading", { name: "Not discussed" }),
     ).toBeVisible();
-    expect(screen.getByText("Repair fan and two switches")).toBeVisible();
+    expect(screen.getByText("Repair one fan and two switches")).toBeVisible();
+  });
+
+  it("shows the original statement and participant for evidence", () => {
+    render(<AgreementMap terms={terms} />);
+
+    expect(screen.getByText("Homeowner · original")).toBeInTheDocument();
+    expect(
+      screen.getByText("“Repair the fan and two switches.”"),
+    ).toBeInTheDocument();
   });
 
   it("shows evidence controls only for non-missing terms", () => {

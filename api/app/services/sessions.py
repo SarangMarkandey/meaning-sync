@@ -16,14 +16,19 @@ from app.schemas.session import (
     ClarityReceipt,
     ConsentStatus,
     EvidenceReference,
+    MaterialsPolicy,
+    ParticipantLanguages,
+    ParticipantTermStatus,
     PartyConfirmation,
     PartyRole,
     SessionMode,
+    SessionParticipant,
     SessionStage,
     SessionView,
     TermStatus,
     TranscriptTurn,
 )
+from app.services.translation import TranslationService, with_optional_translation
 
 NEXT_STAGE = {
     SessionStage.CREATED: SessionStage.CONSENT_PENDING,
@@ -42,6 +47,7 @@ class SessionRecord:
     mode: SessionMode
     stage: SessionStage
     created_at: datetime
+    participants: list[SessionParticipant]
     consent: dict[PartyRole, ConsentStatus]
     transcript: list[TranscriptTurn]
     terms: list[AgreementTerm] = field(default_factory=list)
@@ -54,22 +60,54 @@ class SessionRecord:
 
 
 class SessionService:
-    def __init__(self) -> None:
+    def __init__(self, translation_service: TranslationService | None = None) -> None:
         self._sessions: dict[str, SessionRecord] = {}
         self._lock = RLock()
+        self._translation_service = translation_service
 
     def reset(self) -> None:
         with self._lock:
             self._sessions.clear()
 
-    def create_demo(self) -> SessionView:
+    def create_demo(
+        self, participant_languages: ParticipantLanguages | None = None
+    ) -> SessionView:
+        languages = participant_languages or ParticipantLanguages()
+        session_id = str(uuid4())
+        participants = [
+            SessionParticipant(
+                id=PartyRole.HIRER,
+                role=PartyRole.HIRER,
+                display_name="Homeowner",
+                language=languages.hirer,
+                requested_display_language=languages.hirer,
+            ),
+            SessionParticipant(
+                id=PartyRole.WORKER,
+                role=PartyRole.WORKER,
+                display_name="Electrician",
+                language=languages.worker,
+                requested_display_language=languages.worker,
+            ),
+        ]
+        transcript = demo_transcript(session_id)
+        for target_language in {
+            participant.requested_display_language for participant in participants
+        }:
+            transcript = [
+                with_optional_translation(
+                    message, target_language, self._translation_service
+                )
+                for message in transcript
+            ]
         record = SessionRecord(
-            id=str(uuid4()),
+            id=session_id,
             mode=SessionMode.DEMO,
             stage=SessionStage.CREATED,
             created_at=datetime.now(UTC),
+            participants=participants,
             consent={role: ConsentStatus.PENDING for role in PartyRole},
-            transcript=demo_transcript(),
+            transcript=transcript,
         )
         with self._lock:
             self._sessions[record.id] = record
@@ -99,7 +137,7 @@ class SessionService:
         with self._lock:
             record = self._record(session_id)
             self._require_stage(record, SessionStage.DISCUSSION)
-            record.terms = demo_terms()
+            record.terms = demo_terms(record.transcript)
             record.questions = demo_questions()
             self._transition(record, SessionStage.ANALYZED)
             return self._view(record)
@@ -126,23 +164,20 @@ class SessionService:
             )
             if question is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found")
-            if answer not in question.options:
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    "Answer must match one of the provided options",
-                )
+            meaning = self._materials_meaning(answer)
             question_answers = record.answers.setdefault(question_id, {})
             question_answers[party] = ClarificationAnswer(
                 question_id=question_id,
                 party=party,
                 answer=answer,
+                meaning=meaning,
                 submitted_at=datetime.now(UTC),
             )
             if len(question_answers) < len(PartyRole):
                 return ClarificationResult(question=question, revealed=False)
 
             revealed_answers = [question_answers[role] for role in PartyRole]
-            compatible = len({item.answer for item in revealed_answers}) == 1
+            compatible = len({item.meaning for item in revealed_answers}) == 1
             term = self._resolve_term(record, question, revealed_answers, compatible)
             self._transition(record, SessionStage.TEACHBACK)
             return ClarificationResult(
@@ -209,7 +244,8 @@ class SessionService:
             EvidenceReference(
                 source="clarification",
                 reference_id=f"{answer.question_id}:{answer.party.value}",
-                excerpt=answer.answer,
+                participant_id=answer.party,
+                original_text=answer.answer,
             )
             for answer in answers
         ]
@@ -218,13 +254,50 @@ class SessionService:
             label=current.label,
             status=TermStatus.CONFIRMED if compatible else TermStatus.CONFLICT,
             value=(
-                answers[0].answer
+                (
+                    "Parts are included"
+                    if answers[0].meaning == MaterialsPolicy.INCLUDED
+                    else "Parts are charged separately"
+                )
                 if compatible
                 else "The parties gave different clarification answers"
             ),
             evidence=[*current.evidence, *clarification_evidence],
+            participant_confirmations={
+                role: (
+                    ParticipantTermStatus.CONFIRMED
+                    if compatible
+                    else ParticipantTermStatus.CONFLICTING
+                )
+                for role in PartyRole
+            },
         )
         return record.terms[index]
+
+    @staticmethod
+    def _materials_meaning(answer: str) -> MaterialsPolicy:
+        normalized = " ".join(answer.casefold().replace("₹1,200", "").split())
+        included_answers = {
+            "included",
+            "parts are included",
+            "replacement parts are included",
+            "include replacement parts",
+        }
+        separate_answers = {
+            "charged_separately",
+            "separate",
+            "parts are charged separately",
+            "replacement parts are charged separately",
+            "replacement parts are separate",
+        }
+        if normalized in included_answers:
+            return MaterialsPolicy.INCLUDED
+        if normalized in separate_answers:
+            return MaterialsPolicy.CHARGED_SEPARATELY
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Answer must express whether replacement parts are included or separate",
+        )
 
     def _transition(self, record: SessionRecord, target: SessionStage) -> None:
         if NEXT_STAGE.get(record.stage) != target:
@@ -258,6 +331,7 @@ class SessionService:
             mode=record.mode,
             stage=record.stage,
             created_at=record.created_at,
+            participants=record.participants,
             consent=record.consent,
             transcript=record.transcript,
             terms=record.terms,

@@ -6,6 +6,7 @@ from app.schemas.session import (
     ClarityReceipt,
     ConfirmationSubmission,
     ConsentSubmission,
+    DemoSessionCreate,
     SessionView,
 )
 from app.services.sessions import session_service
@@ -14,8 +15,11 @@ router = APIRouter(prefix="/api/v1/demo/sessions", tags=["demo sessions"])
 
 
 @router.post("", response_model=SessionView, status_code=201)
-async def create_demo_session() -> SessionView:
-    return session_service.create_demo()
+async def create_demo_session(
+    submission: DemoSessionCreate | None = None,
+) -> SessionView:
+    languages = submission.participant_languages if submission else None
+    return session_service.create_demo(languages)
 
 
 @router.get("/{session_id}", response_model=SessionView)

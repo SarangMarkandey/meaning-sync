@@ -1,5 +1,10 @@
 import type { AgreementTerm, TermStatus } from "@/lib/api";
 
+const participantNames = {
+  hirer: "Homeowner",
+  worker: "Electrician",
+};
+
 const sections: Array<{
   status: TermStatus;
   title: string;
@@ -62,8 +67,10 @@ export function AgreementMap({ terms }: { terms: AgreementTerm[] }) {
                       <ul>
                         {term.evidence.map((reference) => (
                           <li key={`${reference.source}-${reference.reference_id}`}>
-                            <span>{reference.source}</span>
-                            “{reference.excerpt}”
+                            <span>
+                              {participantNames[reference.participant_id]} · original
+                            </span>
+                            “{reference.original_text}”
                           </li>
                         ))}
                       </ul>
