@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+bwwoai/
+
+# Node and Next.js
+node_modules/
+.next/
+out/
+build/
+coverage/
+*.tsbuildinfo
+
+# Local configuration and tooling
+.env
+.env.*
+!.env.example
+.DS_Store
+.vercel/
