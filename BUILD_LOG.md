@@ -47,3 +47,21 @@ Verification results:
 - FastAPI import/OpenAPI and development-server startup: passed.
 
 The whole-tree Ruff check still reports the preserved pre-existing whitespace edit in `api/app/config.py`; that unrelated user change was not overwritten.
+
+## UI Repair — Demo Setup Layout
+
+**Date:** 2026-07-15
+
+- Confirmed the project uses `globals.css` (imported by the root layout) plus Tailwind, with no CSS modules or missing stylesheet import. Setup JSX class names match the global selectors.
+- Repaired the partially applied setup presentation with a centered 1040px page container, 940px form, responsive two-column card grid, equal card padding, explicit label/select layout, and a visible select affordance.
+- Separated the selected-conversation panel from availability messaging, aligned equal-height actions, and removed the duplicate top-right “Demo setup” pill.
+- Preserved visible keyboard focus, semantic labels, English defaults, disabled Hindi options, URL-based language transfer, and all existing demo behavior.
+
+Verification:
+
+- `npm run lint`: passed.
+- `npm run type-check`: passed.
+- `npm test`: 11 passed.
+- `npm run build`: passed.
+- Browser inspection passed at 1440×900, 1024×768, and 390×844 with no clipping or horizontal overflow.
+- Computed styles confirmed the setup container, grid, cards, selects, and actions receive their intended rules. Chrome reported no CSS, hydration, or React errors.

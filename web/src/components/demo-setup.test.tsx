@@ -18,11 +18,16 @@ describe("DemoSetup", () => {
     expect(
       screen.getByRole("heading", { name: "Choose the conversation languages" }),
     ).toBeVisible();
+    expect(screen.getByText("Participant 1")).toBeVisible();
+    expect(screen.getByText("Participant 2")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Homeowner" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Electrician" })).toBeVisible();
     const [homeownerLanguage, electricianLanguage] =
       screen.getAllByLabelText("Language");
     expect(homeownerLanguage).toHaveValue("en");
     expect(electricianLanguage).toHaveValue("en");
     expect(screen.getByText("English ↔ English")).toBeVisible();
+    expect(screen.getAllByText("Demo setup")).toHaveLength(1);
   });
 
   it("starts the demo with both independent language values", () => {

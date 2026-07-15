@@ -41,7 +41,6 @@ export function DemoSetup() {
           <span className="brand-mark">M</span>
           <span>MeaningSync</span>
         </Link>
-        <span className="demo-pill">Demo setup</span>
       </nav>
       <section className="setup-page">
         <header className="flow-heading">
@@ -83,11 +82,11 @@ export function DemoSetup() {
             <strong>
               {languageNames[languages.hirer]} ↔ {languageNames[languages.worker]}
             </strong>
-            <p>
-              English conversations are available now. Hindi and mixed-language
-              conversations are coming next.
-            </p>
           </div>
+          <p className="setup-availability">
+            English conversations are available now. Hindi and mixed-language
+            conversations are coming next.
+          </p>
 
           <div className="setup-actions">
             <Link className="button secondary" href="/">
