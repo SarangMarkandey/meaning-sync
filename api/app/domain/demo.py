@@ -1,75 +1,93 @@
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from app.schemas.session import (
     AgreementTerm,
     ClarificationQuestion,
     EvidenceReference,
+    LanguageCode,
+    ParticipantTermStatus,
     PartyRole,
     TermStatus,
     TranscriptTurn,
 )
 
+CONFIRMED_BY_BOTH = {
+    PartyRole.HIRER: ParticipantTermStatus.CONFIRMED,
+    PartyRole.WORKER: ParticipantTermStatus.CONFIRMED,
+}
+CONFLICTING_BY_PARTY = {
+    PartyRole.HIRER: ParticipantTermStatus.CONFLICTING,
+    PartyRole.WORKER: ParticipantTermStatus.CONFLICTING,
+}
+NOT_STATED = {
+    PartyRole.HIRER: ParticipantTermStatus.NOT_STATED,
+    PartyRole.WORKER: ParticipantTermStatus.NOT_STATED,
+}
 
-def demo_transcript() -> list[TranscriptTurn]:
+
+def demo_transcript(session_id: str) -> list[TranscriptTurn]:
+    started_at = datetime.now(UTC)
+    messages = [
+        (
+            PartyRole.HIRER,
+            "Homeowner",
+            "I will pay ₹1,200 for repairing the fan and two switches, "
+            "including replacement parts.",
+        ),
+        (
+            PartyRole.WORKER,
+            "Electrician",
+            "₹1,200 covers my labour. Replacement parts are separate.",
+        ),
+        (PartyRole.HIRER, "Homeowner", "The work can start today."),
+        (PartyRole.WORKER, "Electrician", "Yes, I can start today."),
+    ]
     return [
         TranscriptTurn(
-            id="turn-1",
-            speaker=PartyRole.HIRER,
-            speaker_name="Asha",
-            language="hinglish",
-            text="Ravi ji, aaj ceiling fan aur do switches repair karne hain.",
-        ),
-        TranscriptTurn(
-            id="turn-2",
-            speaker=PartyRole.WORKER,
-            speaker_name="Ravi",
-            language="hinglish",
-            text=(
-                "Theek hai: fan aur dono switches. Labour ka total ₹1,200 hoga, "
-                "aur main aaj shuru karunga."
-            ),
-        ),
-        TranscriptTurn(
-            id="turn-3",
-            speaker=PartyRole.HIRER,
-            speaker_name="Asha",
-            language="hinglish",
-            text=(
-                "Haan, fan aur do switches ke labour ke ₹1,200 theek hain. "
-                "Replacement parts bhi included hain na?"
-            ),
-        ),
-        TranscriptTurn(
-            id="turn-4",
-            speaker=PartyRole.WORKER,
-            speaker_name="Ravi",
-            language="hinglish",
-            text=(
-                "Kaam aur labour price confirmed. Lekin replacement parts ₹1,200 "
-                "mein included nahi hain; woh alag lagenge."
-            ),
-        ),
+            id=f"message-{index}",
+            session_id=session_id,
+            participant_id=role,
+            speaker=role,
+            speaker_name=name,
+            original_text=text,
+            original_language=LanguageCode.ENGLISH,
+            timestamp=started_at + timedelta(seconds=index - 1),
+        )
+        for index, (role, name, text) in enumerate(messages, start=1)
     ]
 
 
-def _evidence(turn_id: str, excerpt: str) -> EvidenceReference:
-    return EvidenceReference(source="transcript", reference_id=turn_id, excerpt=excerpt)
+def _evidence(message: TranscriptTurn) -> EvidenceReference:
+    return EvidenceReference(
+        source="transcript",
+        reference_id=message.id,
+        participant_id=message.participant_id,
+        message_id=message.id,
+        original_text=message.original_text,
+    )
 
 
-def demo_terms(today: date | None = None) -> list[AgreementTerm]:
+def demo_terms(
+    transcript: list[TranscriptTurn], today: date | None = None
+) -> list[AgreementTerm]:
+    messages = {message.id: message for message in transcript}
     current_date = today or date.today()
     return [
         AgreementTerm(
-            id="scope",
-            label="Scope of work",
+            id="fan-repair",
+            label="Fan repair",
             status=TermStatus.CONFIRMED,
-            value="Repair one ceiling fan and two switches",
-            evidence=[
-                _evidence(
-                    "turn-3", "fan aur do switches ke labour ke ₹1,200 theek hain"
-                ),
-                _evidence("turn-4", "Kaam aur labour price confirmed"),
-            ],
+            value="Repair one fan",
+            evidence=[_evidence(messages["message-1"])],
+            participant_confirmations=CONFIRMED_BY_BOTH,
+        ),
+        AgreementTerm(
+            id="switch-repair",
+            label="Switch repair",
+            status=TermStatus.CONFIRMED,
+            value="Repair two switches",
+            evidence=[_evidence(messages["message-1"])],
+            participant_confirmations=CONFIRMED_BY_BOTH,
         ),
         AgreementTerm(
             id="labour-price",
@@ -77,19 +95,24 @@ def demo_terms(today: date | None = None) -> list[AgreementTerm]:
             status=TermStatus.CONFIRMED,
             value="₹1,200",
             evidence=[
-                _evidence("turn-2", "Labour ka total ₹1,200 hoga"),
-                _evidence("turn-3", "labour ke ₹1,200 theek hain"),
+                _evidence(messages["message-1"]),
+                _evidence(messages["message-2"]),
             ],
+            participant_confirmations=CONFIRMED_BY_BOTH,
         ),
         AgreementTerm(
             id="materials",
             label="Replacement parts",
             status=TermStatus.CONFLICT,
-            value="Asha expects parts included; Ravi expects a separate charge",
+            value=(
+                "Homeowner says parts are included in ₹1,200; electrician "
+                "charges them separately"
+            ),
             evidence=[
-                _evidence("turn-3", "Replacement parts bhi included hain na?"),
-                _evidence("turn-4", "replacement parts ₹1,200 mein included nahi hain"),
+                _evidence(messages["message-1"]),
+                _evidence(messages["message-2"]),
             ],
+            participant_confirmations=CONFLICTING_BY_PARTY,
         ),
         AgreementTerm(
             id="start-date",
@@ -97,24 +120,34 @@ def demo_terms(today: date | None = None) -> list[AgreementTerm]:
             status=TermStatus.CONFIRMED,
             value=current_date.isoformat(),
             evidence=[
-                _evidence("turn-1", "aaj"),
-                _evidence("turn-2", "main aaj shuru karunga"),
+                _evidence(messages["message-3"]),
+                _evidence(messages["message-4"]),
             ],
+            participant_confirmations=CONFIRMED_BY_BOTH,
         ),
         AgreementTerm(
             id="completion-time",
-            label="Completion time",
+            label="Completion date or time",
             status=TermStatus.MISSING,
+            participant_confirmations=NOT_STATED,
         ),
         AgreementTerm(
             id="payment-timing",
             label="Payment timing",
             status=TermStatus.MISSING,
+            participant_confirmations=NOT_STATED,
+        ),
+        AgreementTerm(
+            id="warranty",
+            label="Warranty",
+            status=TermStatus.MISSING,
+            participant_confirmations=NOT_STATED,
         ),
         AgreementTerm(
             id="additional-work",
-            label="Additional-work policy",
+            label="Handling of additional work",
             status=TermStatus.MISSING,
+            participant_confirmations=NOT_STATED,
         ),
     ]
 
@@ -124,7 +157,10 @@ def demo_questions() -> list[ClarificationQuestion]:
         ClarificationQuestion(
             id="materials-inclusion",
             term_id="materials",
-            prompt="Are replacement parts included in the ₹1,200 labour price?",
+            prompt=(
+                "Does the ₹1,200 price include replacement parts, or are "
+                "replacement parts charged separately?"
+            ),
             options=["Parts are included", "Parts are charged separately"],
         )
     ]

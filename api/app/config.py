@@ -1,6 +1,5 @@
 import os
 
-
 def cors_origins() -> list[str]:
     raw_origins = os.getenv(
         "MEANINGSYNC_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
