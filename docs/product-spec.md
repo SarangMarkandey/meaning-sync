@@ -1,31 +1,27 @@
 # MeaningSync Product Specification
 
-## Problem
+## Product Promise
 
-People can leave the same service conversation with different understandings of scope, price, materials, timing, or follow-up work. MeaningSync exposes shared meaning, contradictions, and omissions using the participants’ own statements. It is not primarily a translation product, does not provide legal advice, and produces a clarity receipt rather than a legally enforceable contract.
+MeaningSync helps two people determine whether their stated understanding of a verbal service agreement matches: “Make sure both sides mean the same thing.” It is not a legal-contract generator, signature service, identity platform, or generic mediator, and it does not provide legal advice.
 
-## Intended Experience
+## Implemented Experiences
 
-MeaningSync supports agreements where both participants use English, both use Hindi, or each uses a different language. Translation may make cross-language display possible, but agreement intelligence remains the core capability.
+The deterministic path is:
 
-The agreement map has three sections:
+`Homepage → Demo setup → Consent → Prepared evidence → Agreement map → Private clarification → Teach-back confirmations → Clarity receipt`
 
-- **Confirmed:** both participants share the same meaning.
-- **Needs clarification:** their stated meanings conflict.
-- **Not discussed:** required topics lack evidence.
+The English live-text preview is:
 
-A neutral question targets each conflict. Participants answer separately; the first answer stays hidden until both respond. Each participant then confirms a teach-back. The final clarity receipt preserves confirmed, unresolved, and missing terms.
+`Homepage → Live setup → Speaker-attributed text → Analyze → Agreement map → Evidence → Neutral clarification`
 
-The implemented journey is:
+Users can add, edit, remove, or load sample statements. Analysis requires meaningful input from both people. The agreement map groups `aligned` as **Confirmed**, `conflicting` and `stated_by_one` as **Needs clarification**, and `not_discussed` as **Not discussed**. Only explicit evidence from both people can produce alignment.
 
-`Homepage → Demo language setup → Demo conversation → Agreement map → Clarification → Separate confirmations → Clarity receipt`
+The required sample shows alignment on price amount and starting today, plus a materials-inclusion conflict about replacement parts. Evidence always links to original messages. If only the clarification is unusable, Live Mode preserves the agreement map and shows a partial-analysis warning; invalid core analysis shows safe retry guidance without fixture fallback.
 
-The homepage stays focused on the product promise and mode navigation. Selecting **Try Demo** opens `/demo/setup`, where homeowner and electrician languages are stored independently. Both default to English. Language selectors and availability messaging do not appear on the homepage.
+## Status
 
-## Modes and Status
+**Implemented:** deterministic English demo and receipt, English live-text entry and OpenAI Structured Outputs, original evidence, semantic post-validation, and safe errors.
 
-**Implemented:** Demo Mode with a prepared English ↔ English homeowner/electrician conversation, deterministic analysis, original evidence, private clarification, separate confirmation, and clarity receipt.
+**Partially implemented:** independent English/Hindi language fields and a translation boundary; Hindi remains disabled.
 
-**Partially implemented:** independent `en`/`hi` participant settings, original/translated message fields, and an optional translation boundary. The setup screen shows Hindi as coming soon and prevents unsupported sessions from starting. Hindi experiences do not yet have a real translation provider or complete UI.
-
-**Planned:** Live Mode with speech, separate-device session participation, QR joining, durable storage, backend OpenAI analysis, Hindi ↔ Hindi, English ↔ Hindi, and bilingual receipts. The landing page exposes Live Mode only as a future milestone.
+**Planned:** audio with explicit consent, Hindi and translation, QR/device joining, realtime updates, persistence, separate live confirmations, and a live clarity receipt. The current live result is an agreement map, not a receipt or legal document.

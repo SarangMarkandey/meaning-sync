@@ -1,80 +1,48 @@
 # API Contract
 
-All implemented workflow endpoints are under `/api/v1/demo/sessions` and use JSON. Session state is in memory.
+All implemented endpoints are JSON under `/api/v1`. `GET /health` returns service status.
 
-## Create and Load a Session
+## Live Agreement Analysis
 
-`POST /api/v1/demo/sessions` accepts an optional body; omitted values default independently to English:
-
-```json
-{"participant_languages":{"hirer":"en","worker":"en"}}
-```
-
-`GET /api/v1/demo/sessions/{session_id}` returns the same `SessionView`. Its core shape is:
+`POST /api/v1/agreements/analyze` accepts Live Mode, exactly one hirer and one worker, and 2–40 ordered English messages:
 
 ```json
 {
-  "id": "uuid",
-  "mode": "demo",
-  "stage": "created",
+  "session_id": "live-r1",
+  "mode": "live",
   "participants": [
-    {"id":"hirer","role":"hirer","display_name":"Homeowner","language":"en","requested_display_language":"en"},
-    {"id":"worker","role":"worker","display_name":"Electrician","language":"en","requested_display_language":"en"}
+    {"id":"hirer","role":"hirer","language":"en"},
+    {"id":"worker","role":"worker","language":"en"}
   ],
-  "consent": {"hirer":"pending","worker":"pending"},
-  "transcript": [
-    {
-      "id":"message-1",
-      "session_id":"uuid",
-      "participant_id":"hirer",
-      "speaker":"hirer",
-      "speaker_name":"Homeowner",
-      "original_text":"I will pay ₹1,200 for repairing the fan and two switches, including replacement parts.",
-      "original_language":"en",
-      "timestamp":"2026-07-15T00:00:00Z",
-      "translations":{}
-    }
-  ],
-  "terms": [],
-  "clarification_questions": [],
-  "confirmations": []
+  "messages": [
+    {"message_id":"message-1","speaker_id":"hirer","original_text":"Start today.","original_language":"en","order":1,"timestamp":"2026-07-16T09:00:00Z"},
+    {"message_id":"message-2","speaker_id":"worker","original_text":"I can start today.","original_language":"en","order":2,"timestamp":"2026-07-16T09:01:00Z"}
+  ]
 }
 ```
 
-Only `en` and `hi` are accepted. The current deterministic content is English; Hindi and mixed-language user flows are planned.
+The response includes `prompt_version`, configured `model`, `status` (`complete` or `partial`), `warnings`, agreement terms, and zero or one `primary_clarification`. Each term has canonical `analysis_item_key`, `topic`, and `facet` fields; neutral `summary`; underlying `state` (`aligned`, `conflicting`, `stated_by_one`, or `not_discussed`); participant positions/statuses; evidence message IDs; backend-hydrated original evidence; and an optional exact item-key clarification target. The backend derives a clarification's target item key, topic, facet, and evidence IDs from its owning term.
 
-## Messages and Agreement Terms
+Atomic keys prevent adjacent meanings from being merged. For example, agreement on `price.amount` remains aligned when the parties conflict on `materials.inclusion`.
 
-Each transcript message includes `id`, `session_id`, `participant_id`, `speaker`, `speaker_name`, `original_text`, `original_language`, `timestamp`, and `translations` keyed by target language.
+A valid map with an unusable clarification returns HTTP 200, `status: "partial"`, no `primary_clarification`, and warning code `clarification_unavailable`. The UI preserves the map and displays: “The agreement map is ready, but a clarification question could not be generated. Review the highlighted conflict.”
 
-Each term includes `id`, `label`, `status` (`confirmed`, `conflict`, or `missing`), `value`, `evidence`, and `participant_confirmations`. Transcript evidence contains `participant_id`, `message_id`, and `original_text`. Missing terms have no evidence and remain distinct from conflicts.
+HTTP 502 is reserved for invalid core model output or evidence. Errors use a controlled shape: `{"detail":{"code":"invalid_model_output","message":"…","retryable":true}}`. Other codes cover invalid requests/configuration/API keys, rate limits, timeout, connection failure, refusal, and provider failure. Provider details are not returned.
 
-## Workflow Endpoints
+## Deterministic Demo Sessions
 
-- `POST /{session_id}/consent` — `{"party":"hirer","accepted":true}`
-- `POST /{session_id}/analysis` — advances discussion to analyzed and returns terms.
-- `POST /{session_id}/clarifications` — opens clarification.
-- `POST /{session_id}/clarifications/{question_id}/answers` — accepts `party` and an answer expressing included/separate materials. Before both answer, `revealed` is false and `answers` is empty. Once both answer, each answer includes canonical `meaning`.
-- `POST /{session_id}/confirmations` — accepts `party`, `confirmed`, and `teachback`; both parties must confirm.
-- `POST /{session_id}/receipt` — returns the clarity receipt only after confirmation.
+`POST /api/v1/demo/sessions` accepts optional independent languages, currently `en`/`en`. Follow-up routes use the returned session ID:
 
-Example clarification body:
+- `GET /{session_id}`
+- `POST /{session_id}/consent`
+- `POST /{session_id}/analysis`
+- `POST /{session_id}/clarifications`
+- `POST /{session_id}/clarifications/{question_id}/answers`
+- `POST /{session_id}/confirmations`
+- `POST /{session_id}/receipt`
 
-```json
-{"party":"worker","answer":"Replacement parts are separate"}
-```
+All paths above are relative to `/api/v1/demo/sessions`. First clarification answers remain hidden until both parties answer. The receipt preserves unresolved and not-discussed terms.
 
-Example result after both answers:
+## Status
 
-```json
-{
-  "revealed": true,
-  "answers": [
-    {"party":"hirer","answer":"Parts are charged separately","meaning":"charged_separately"},
-    {"party":"worker","answer":"Replacement parts are separate","meaning":"charged_separately"}
-  ],
-  "resolved": true
-}
-```
-
-Timestamps, question metadata, and the resulting term are also present in actual responses. There are no implemented Live Mode, translation, audio, QR, or persistence endpoints.
+Implemented: the live endpoint and deterministic routes. Partially implemented: `hi` exists in shared language models but live requests reject it. Planned: audio, translation, authentication, persistence, device joining, and live clarity-receipt endpoints. MeaningSync does not provide legal advice.

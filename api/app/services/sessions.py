@@ -7,7 +7,14 @@ from uuid import uuid4
 
 from fastapi import HTTPException, status
 
-from app.domain.demo import demo_questions, demo_terms, demo_transcript
+from app.domain.demo import demo_transcript
+from app.schemas.analysis import (
+    AgreementAnalysisRequest,
+    AnalysisMessage,
+    AnalysisParticipant,
+    EvidenceReference,
+    MeaningState,
+)
 from app.schemas.session import (
     AgreementTerm,
     ClarificationAnswer,
@@ -15,19 +22,18 @@ from app.schemas.session import (
     ClarificationResult,
     ClarityReceipt,
     ConsentStatus,
-    EvidenceReference,
     MaterialsPolicy,
     ParticipantLanguages,
-    ParticipantTermStatus,
     PartyConfirmation,
     PartyRole,
     SessionMode,
     SessionParticipant,
     SessionStage,
     SessionView,
-    TermStatus,
     TranscriptTurn,
 )
+from app.services.analyzers import AgreementAnalyzer, DeterministicAgreementAnalyzer
+from app.services.analyzers.validation import ROLE_NAMES
 from app.services.translation import TranslationService, with_optional_translation
 
 NEXT_STAGE = {
@@ -60,10 +66,15 @@ class SessionRecord:
 
 
 class SessionService:
-    def __init__(self, translation_service: TranslationService | None = None) -> None:
+    def __init__(
+        self,
+        translation_service: TranslationService | None = None,
+        analyzer: AgreementAnalyzer | None = None,
+    ) -> None:
         self._sessions: dict[str, SessionRecord] = {}
         self._lock = RLock()
         self._translation_service = translation_service
+        self._analyzer = analyzer or DeterministicAgreementAnalyzer()
 
     def reset(self) -> None:
         with self._lock:
@@ -133,12 +144,23 @@ class SessionService:
                 self._transition(record, SessionStage.DISCUSSION)
             return self._view(record)
 
-    def analyze(self, session_id: str) -> SessionView:
+    async def analyze(self, session_id: str) -> SessionView:
         with self._lock:
             record = self._record(session_id)
             self._require_stage(record, SessionStage.DISCUSSION)
-            record.terms = demo_terms(record.transcript)
-            record.questions = demo_questions()
+            request = self._analysis_request(record)
+
+        analysis = await self._analyzer.analyze(request)
+
+        with self._lock:
+            record = self._record(session_id)
+            self._require_stage(record, SessionStage.DISCUSSION)
+            record.terms = analysis.terms
+            record.questions = (
+                [analysis.primary_clarification]
+                if analysis.primary_clarification is not None
+                else []
+            )
             self._transition(record, SessionStage.ANALYZED)
             return self._view(record)
 
@@ -245,15 +267,25 @@ class SessionService:
                 source="clarification",
                 reference_id=f"{answer.question_id}:{answer.party.value}",
                 participant_id=answer.party,
+                role=answer.party,
+                speaker_name=ROLE_NAMES[answer.party],
                 original_text=answer.answer,
+                original_language=next(
+                    participant.language
+                    for participant in record.participants
+                    if participant.role == answer.party
+                ),
             )
             for answer in answers
         ]
         record.terms[index] = AgreementTerm(
             id=current.id,
+            analysis_item_key=current.analysis_item_key,
+            topic=current.topic,
+            facet=current.facet,
             label=current.label,
-            status=TermStatus.CONFIRMED if compatible else TermStatus.CONFLICT,
-            value=(
+            state=MeaningState.ALIGNED if compatible else MeaningState.CONFLICTING,
+            summary=(
                 (
                     "Parts are included"
                     if answers[0].meaning == MaterialsPolicy.INCLUDED
@@ -262,15 +294,14 @@ class SessionService:
                 if compatible
                 else "The parties gave different clarification answers"
             ),
+            participant_positions=current.participant_positions,
+            evidence_message_ids=current.evidence_message_ids,
             evidence=[*current.evidence, *clarification_evidence],
             participant_confirmations={
-                role: (
-                    ParticipantTermStatus.CONFIRMED
-                    if compatible
-                    else ParticipantTermStatus.CONFLICTING
-                )
+                role: ("confirmed" if compatible else "conflicting")
                 for role in PartyRole
             },
+            clarification_target=(None if compatible else current.analysis_item_key),
         )
         return record.terms[index]
 
@@ -323,6 +354,32 @@ class SessionService:
         if record is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
         return record
+
+    @staticmethod
+    def _analysis_request(record: SessionRecord) -> AgreementAnalysisRequest:
+        return AgreementAnalysisRequest(
+            session_id=record.id,
+            mode=record.mode,
+            participants=[
+                AnalysisParticipant(
+                    id=participant.id.value,
+                    role=participant.role,
+                    language=participant.language,
+                )
+                for participant in record.participants
+            ],
+            messages=[
+                AnalysisMessage(
+                    message_id=message.id,
+                    speaker_id=message.participant_id.value,
+                    original_text=message.original_text,
+                    original_language=message.original_language,
+                    order=message.order,
+                    timestamp=message.timestamp,
+                )
+                for message in record.transcript
+            ],
+        )
 
     @staticmethod
     def _view(record: SessionRecord) -> SessionView:

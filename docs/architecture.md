@@ -1,30 +1,30 @@
 # MeaningSync Architecture
 
-## Implemented System
-
-The Next.js 16 frontend uses one typed JSON client to call FastAPI, served by Uvicorn. The backend owns the session state machine, deterministic agreement analysis, clarification privacy, and clarity receipts. Only the backend may eventually call OpenAI. Current sessions use process-local memory.
+## Implemented Paths
 
 ```mermaid
 flowchart LR
-  B[Next.js browser] -->|JSON + session ID| API[FastAPI on Uvicorn]
-  API --> SM[Session state machine]
-  SM --> MEM[In-memory session store]
-  SM --> DET[English deterministic analyzer]
-  DET --> PROV[Original-message provenance]
-  API -. optional display text .-> TR[Translation boundary]
-  DET -. planned structured extraction .-> OAI[OpenAI API]
+  subgraph Demo[Deterministic Demo]
+    DWEB[Next.js] --> DAPI[FastAPI]
+    DAPI --> DET[Deterministic analyzer]
+    DET --> DMAP[Agreement map]
+  end
+  subgraph Live[Live Text Analysis]
+    LWEB[Next.js] --> LAPI[FastAPI]
+    LAPI --> OAI[OpenAI analyzer]
+    OAI --> VAL[Evidence validation]
+    VAL --> LMAP[Agreement map]
+  end
 ```
 
-The browser path is `/` → `/demo/setup` → `/demo?hirer_language=en&worker_language=en`. The setup route owns independent language selection; the demo route rejects unsupported combinations and passes validated values to `POST /api/v1/demo/sessions`. The existing flow then performs separate consent, deterministic analysis, private clarification, separate teach-back confirmation, and receipt creation. Refreshing `/demo` preserves the selected language values in its URL. FastAPI is configured through `[tool.fastapi] entrypoint = "app.main:app"` and can run with `fastapi dev` or explicit Uvicorn commands.
+The browser calls one typed JSON API client. Only FastAPI imports the OpenAI SDK or reads `OPENAI_API_KEY`. Both analyzers implement one asynchronous `AgreementAnalyzer` protocol and return the same application-owned contract: atomic topic/facet keys, meaning states, participant positions/statuses, message IDs, hydrated original evidence, and at most one exact-item clarification. Responses distinguish complete, partial-with-warning, and controlled error outcomes.
 
-## Language and Evidence Model
+Demo sessions use process-local storage and the ordered state machine. The deterministic analyzer never needs an API key. Live Text Analysis is stateless per request: `/live` sends two participants and ordered English messages to `POST /api/v1/agreements/analyze`.
 
-Each session participant independently stores `language` and `requested_display_language` as ISO 639-1 `en` or `hi`. English is the default for both. No pair enum couples the two settings.
+## Trust Boundaries
 
-Each message retains its session ID, message ID, participant, original text, original language, timestamp, and optional translations keyed by target language. Translation creates display text without replacing original evidence. Each agreement term links back to supporting message IDs, participants, and original statements and carries a confirmation status for both participants.
+OpenAI receives serialized participant text as untrusted data and returns strict Pydantic Structured Outputs containing message IDs, not authoritative quotations. A clarification question is nested inside its unresolved model term. FastAPI verifies canonical topic/facet keys, atomic-item uniqueness, speaker ownership, both-party support for alignment/conflict, and correct one-sided evidence, then derives the public clarification target and evidence from that owner. Exact original statements are hydrated from the request. Invalid core output returns a controlled error; clarification-only failure returns a partial map without a fabricated question. No fallback fabricates live results, and responses are submitted with `store=False`.
 
-## Boundaries and Limitations
+## Status and Limits
 
-English ↔ English is fully implemented and never invokes translation. Hindi ↔ Hindi and English ↔ Hindi are represented by the model but their user flows and provider-backed translation are planned. Hindi choices are visible but disabled on demo setup, and Live Mode remains disabled. The eventual Live setup will reuse the same two independent participant-language values. The translation protocol is deliberately small and has no production provider.
-
-Because storage is in memory, restarts lose sessions and multiple Uvicorn workers would diverge; use one process. Planned architecture adds durable persistence, realtime separate-device joining, QR handoff, audio input/playback, and backend-only OpenAI structured extraction. These capabilities are not active today.
+Implemented: both paths above, English text input, safe provider errors, and in-memory demo storage. Partially implemented: independent `en`/`hi` participant fields and a translation boundary. Planned: audio/consent, Hindi analysis, translation, separate devices, QR joining, realtime transport, persistence, separate live confirmations, and a live clarity receipt. MeaningSync does not provide legal advice.

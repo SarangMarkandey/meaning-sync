@@ -2,42 +2,22 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
-
-class SessionMode(StrEnum):
-    DEMO = "demo"
-    LIVE = "live"
-
-
-class PartyRole(StrEnum):
-    HIRER = "hirer"
-    WORKER = "worker"
-
-
-class LanguageCode(StrEnum):
-    ENGLISH = "en"
-    HINDI = "hi"
+from app.schemas.analysis import (
+    AgreementTerm,
+    ClarificationQuestion,
+    LanguageCode,
+    PartyRole,
+    SessionMode,
+)
 
 
 class ConsentStatus(StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     DECLINED = "declined"
-
-
-class TermStatus(StrEnum):
-    CONFIRMED = "confirmed"
-    CONFLICT = "conflict"
-    MISSING = "missing"
-
-
-class ParticipantTermStatus(StrEnum):
-    CONFIRMED = "confirmed"
-    CONFLICTING = "conflicting"
-    NOT_STATED = "not_stated"
 
 
 class MaterialsPolicy(StrEnum):
@@ -83,48 +63,9 @@ class TranscriptTurn(BaseModel):
     speaker_name: str
     original_text: str
     original_language: LanguageCode
+    order: int = Field(ge=1)
     timestamp: datetime
     translations: dict[LanguageCode, str] = Field(default_factory=dict)
-
-
-class EvidenceReference(BaseModel):
-    source: Literal["transcript", "clarification"]
-    reference_id: str
-    participant_id: PartyRole
-    message_id: str | None = None
-    original_text: str
-
-    @model_validator(mode="after")
-    def transcript_evidence_requires_message(self) -> EvidenceReference:
-        if self.source == "transcript" and not self.message_id:
-            raise ValueError("transcript evidence requires a supporting message ID")
-        return self
-
-
-class AgreementTerm(BaseModel):
-    id: str
-    label: str
-    status: TermStatus
-    value: str | None = None
-    evidence: list[EvidenceReference] = Field(default_factory=list)
-    participant_confirmations: dict[PartyRole, ParticipantTermStatus]
-
-    @model_validator(mode="after")
-    def validate_provenance(self) -> AgreementTerm:
-        if set(self.participant_confirmations) != set(PartyRole):
-            raise ValueError("term status is required for both participants")
-        if self.status != TermStatus.MISSING and not self.evidence:
-            raise ValueError("non-missing agreement terms require evidence")
-        if self.status == TermStatus.MISSING and self.evidence:
-            raise ValueError("missing agreement terms cannot cite evidence")
-        return self
-
-
-class ClarificationQuestion(BaseModel):
-    id: str
-    term_id: str
-    prompt: str
-    options: list[str]
 
 
 class ClarificationAnswer(BaseModel):

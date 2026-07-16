@@ -1,11 +1,13 @@
 [project]
 name = "meaningsync-api"
 version = "0.1.0"
-description = "MeaningSync deterministic demo API"
+description = "MeaningSync agreement analysis API"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115,<1",
+    "openai>=2.20,<3",
     "pydantic>=2.10,<3",
+    "pydantic-settings>=2.7,<3",
     "uvicorn[standard]>=0.34,<1",
 ]
 

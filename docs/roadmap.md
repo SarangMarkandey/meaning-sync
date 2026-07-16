@@ -1,24 +1,26 @@
 # MeaningSync Roadmap
 
-## Current Milestone
+## Implemented
 
-- English ↔ English deterministic homeowner/electrician demo
-- Independent participant language model using `en` and `hi`
-- Immutable original-message and term provenance
-- Confirmed, conflicting, and missing agreement-map behavior
-- Neutral materials clarification and meaning-based compatibility
-- Separate participant consent, answers, teach-back, and clarity receipt
-- Clean homepage followed by `/demo/setup` independent language selection
-- URL-preserved English ↔ English demo configuration with unsupported flows blocked
+- Deterministic English homeowner/electrician demo with consent, hidden clarification answers, confirmations, and clarity receipt
+- Shared `aligned`, `conflicting`, `stated_by_one`, and `not_discussed` domain contract
+- English text-based Live Analysis preview with add/edit/remove/sample input
+- Backend-only OpenAI Responses API integration using Pydantic Structured Outputs
+- Prompt version `agreement-analysis-v3`, nested clarification ownership, atomic topic/facet keys, `store=False`, evidence hydration, partial analysis warnings, and controlled failures
+- Twelve-case English evaluation corpus; mocked tests spend no credits
 
-## Next Milestones
+## Partially Implemented
 
-1. OpenAI-powered extraction using backend-only structured output, with deterministic eval fixtures and explicit participant confirmation.
-2. Hindi ↔ Hindi experience and accessible Hindi UI copy.
-3. English ↔ Hindi display using a real optional translation provider while preserving originals.
-4. Speech input and playback with explicit consent and privacy controls.
-5. Separate-device Live Mode with QR joining, realtime session updates, and the same independent participant-language setup model.
-6. Persistent sessions and bilingual clarity receipts.
-7. Expanded safety, consent, deletion, and privacy controls.
+- Independent `en`/`hi` language settings and translation interface; only English flows are enabled
+- Session-oriented models; only Demo Mode currently persists sessions, and only in memory
 
-All items above the current milestone are planned, not active product capabilities.
+## Planned Milestones
+
+1. Evaluate and refine English analysis with explicitly authorized opt-in model runs.
+2. Add separate live participant confirmation and produce a live clarity receipt.
+3. Add Hindi UI, Hindi analysis, and optional translation while preserving original evidence.
+4. Add audio capture/playback with explicit consent and privacy controls.
+5. Add separate-device QR joining and realtime session updates.
+6. Add durable persistence, retention/deletion controls, and expanded safety review.
+
+Planned features are not represented as working. MeaningSync does not provide legal advice or create a legally enforceable document.

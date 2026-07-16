@@ -1,49 +1,125 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { AgreementMap } from "@/components/agreement-map";
-import type { AgreementTerm } from "@/lib/api";
+import type { AgreementTerm, EvidenceReference } from "@/lib/api";
+
+const evidence = (
+  messageId: string,
+  role: "hirer" | "worker",
+  text: string,
+  order: number,
+): EvidenceReference => ({
+  source: "transcript",
+  reference_id: messageId,
+  participant_id: role,
+  role,
+  speaker_name: role === "hirer" ? "Homeowner" : "Electrician",
+  message_id: messageId,
+  original_text: text,
+  original_language: "en",
+  order,
+  timestamp: `2026-07-16T09:0${order}:00Z`,
+});
 
 const terms: AgreementTerm[] = [
   {
-    id: "scope",
+    id: "scope-1",
+    analysis_item_key: "scope.work",
+    topic: "scope",
+    facet: "work",
     label: "Scope of work",
-    status: "confirmed",
-    value: "Repair one fan and two switches",
-    evidence: [
+    summary: "Repair one fan and two switches",
+    state: "aligned",
+    participant_positions: [
       {
-        source: "transcript",
-        reference_id: "message-1",
         participant_id: "hirer",
-        message_id: "message-1",
-        original_text: "Repair the fan and two switches.",
+        role: "hirer",
+        summary: "Repair the fan and switches.",
+        evidence_message_ids: ["message-1"],
       },
+      {
+        participant_id: "worker",
+        role: "worker",
+        summary: "Repair the fan and switches.",
+        evidence_message_ids: ["message-2"],
+      },
+    ],
+    evidence_message_ids: ["message-1", "message-2"],
+    evidence: [
+      evidence("message-1", "hirer", "Repair the fan and two switches.", 1),
+      evidence("message-2", "worker", "I will repair those items.", 2),
     ],
     participant_confirmations: { hirer: "confirmed", worker: "confirmed" },
+    clarification_target: null,
   },
   {
-    id: "materials",
-    label: "Replacement parts",
-    status: "conflict",
-    value: "Different expectations",
-    evidence: [
+    id: "materials-2",
+    analysis_item_key: "materials.inclusion",
+    topic: "materials",
+    facet: "inclusion",
+    label: "Materials",
+    summary: "Different expectations about replacement parts",
+    state: "conflicting",
+    participant_positions: [
       {
-        source: "transcript",
-        reference_id: "message-2",
+        participant_id: "hirer",
+        role: "hirer",
+        summary: "Parts are included.",
+        evidence_message_ids: ["message-1"],
+      },
+      {
         participant_id: "worker",
-        message_id: "message-2",
-        original_text: "Replacement parts are separate.",
+        role: "worker",
+        summary: "Parts are separate.",
+        evidence_message_ids: ["message-2"],
       },
     ],
-    participant_confirmations: { hirer: "conflicting", worker: "conflicting" },
+    evidence_message_ids: ["message-1", "message-2"],
+    evidence: [
+      evidence("message-1", "hirer", "Parts are included.", 1),
+      evidence("message-2", "worker", "Replacement parts are separate.", 2),
+    ],
+    participant_confirmations: {
+      hirer: "conflicting",
+      worker: "conflicting",
+    },
+    clarification_target: "materials.inclusion",
   },
   {
-    id: "completion",
+    id: "payment-3",
+    analysis_item_key: "payment.timing",
+    topic: "payment",
+    facet: "timing",
+    label: "Payment timing",
+    summary: "Only the homeowner states payment timing.",
+    state: "stated_by_one",
+    participant_positions: [
+      {
+        participant_id: "hirer",
+        role: "hirer",
+        summary: "Payment follows completion.",
+        evidence_message_ids: ["message-3"],
+      },
+    ],
+    evidence_message_ids: ["message-3"],
+    evidence: [evidence("message-3", "hirer", "I will pay after the work.", 3)],
+    participant_confirmations: { hirer: "stated", worker: "not_stated" },
+    clarification_target: null,
+  },
+  {
+    id: "completion-4",
+    analysis_item_key: "completion.deadline",
+    topic: "completion",
+    facet: "deadline",
     label: "Completion time",
-    status: "missing",
-    value: null,
+    summary: "Completion time was not discussed.",
+    state: "not_discussed",
+    participant_positions: [],
+    evidence_message_ids: [],
     evidence: [],
     participant_confirmations: { hirer: "not_stated", worker: "not_stated" },
+    clarification_target: null,
   },
 ];
 
@@ -59,21 +135,31 @@ describe("AgreementMap", () => {
       screen.getByRole("heading", { name: "Not discussed" }),
     ).toBeVisible();
     expect(screen.getByText("Repair one fan and two switches")).toBeVisible();
+    expect(screen.getByText("Stated by one person")).toBeVisible();
   });
 
-  it("shows the original statement and participant for evidence", () => {
+  it("shows participant positions for conflicts", () => {
     render(<AgreementMap terms={terms} />);
 
-    expect(screen.getByText("Homeowner · original")).toBeInTheDocument();
-    expect(
-      screen.getByText("“Repair the fan and two switches.”"),
-    ).toBeInTheDocument();
+    expect(screen.getAllByText("Parts are included.")[0]).toBeVisible();
+    expect(screen.getByText("Parts are separate.")).toBeVisible();
   });
 
-  it("shows evidence controls only for non-missing terms", () => {
+  it("shows original evidence metadata", () => {
     render(<AgreementMap terms={terms} />);
 
-    expect(screen.getAllByText(/View evidence/)).toHaveLength(2);
+    expect(screen.getAllByText(/Homeowner · original · English/).length).toBeGreaterThan(0);
+    const quote = screen.getByText("Repair the fan and two switches.");
+    expect(quote).not.toBeVisible();
+    fireEvent.click(screen.getAllByText(/View evidence/)[0]);
+    expect(quote).toBeVisible();
+    expect(screen.getAllByText(/message 1/).length).toBeGreaterThan(0);
+  });
+
+  it("shows evidence controls only for discussed terms", () => {
+    render(<AgreementMap terms={terms} />);
+
+    expect(screen.getAllByText(/View evidence/)).toHaveLength(3);
     const completionCard = screen.getByText("Completion time").closest("article");
     expect(completionCard).not.toBeNull();
     expect(

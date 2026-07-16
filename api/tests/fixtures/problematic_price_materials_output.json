@@ -1,0 +1,53 @@
+{
+  "terms": [
+    {
+      "item_key": "price.amount",
+      "topic": "price",
+      "facet": "amount",
+      "neutral_summary": "The amount and its coverage were combined into one conflict.",
+      "state": "conflicting",
+      "participant_positions": [
+        {
+          "participant_id": "hirer",
+          "summary": "The stated amount includes parts.",
+          "evidence_message_ids": ["message-1"]
+        },
+        {
+          "participant_id": "worker",
+          "summary": "The same amount covers labour only.",
+          "evidence_message_ids": ["message-2"]
+        }
+      ],
+      "evidence_message_ids": ["message-1", "message-2"],
+      "clarification_target": "price.amount"
+    },
+    {
+      "item_key": "materials.inclusion",
+      "topic": "materials",
+      "facet": "inclusion",
+      "neutral_summary": "The parties disagree about replacement-parts inclusion.",
+      "state": "conflicting",
+      "participant_positions": [
+        {
+          "participant_id": "hirer",
+          "summary": "Replacement parts are included.",
+          "evidence_message_ids": ["message-1"]
+        },
+        {
+          "participant_id": "worker",
+          "summary": "Replacement parts are separate.",
+          "evidence_message_ids": ["message-2"]
+        }
+      ],
+      "evidence_message_ids": ["message-1", "message-2"],
+      "clarification_target": "price.amount"
+    }
+  ],
+  "primary_clarification": {
+    "target_item_key": "price.amount",
+    "target": "price",
+    "facet": "amount",
+    "evidence_message_ids": ["message-1", "message-2"],
+    "question": "Are replacement parts included or charged separately?"
+  }
+}
