@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-5.6"
     openai_store_responses: bool = False
     openai_request_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    meaningsync_clarification_attempt_limit: int = Field(default=3, ge=1, le=10)
 
     @field_validator("openai_store_responses")
     @classmethod

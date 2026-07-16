@@ -2,7 +2,7 @@
 
 > Make sure both sides mean the same thing.
 
-MeaningSync compares two people’s stated understanding of a verbal service agreement. It is not a legal-contract generator and does not provide legal advice. The repository currently includes a key-free deterministic demo and an English text-based live-analysis preview powered by OpenAI from FastAPI only.
+MeaningSync compares two people’s stated understanding of a verbal service agreement. It does not force agreement, provide legal advice, generate a legal contract, verify identity, or collect signatures. The repository includes a key-free deterministic demo and an English, same-device Live flow powered by OpenAI from FastAPI only.
 
 ## Local Setup
 
@@ -17,7 +17,7 @@ cp .env.example .env
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-`OPENAI_API_KEY` is optional for Demo Mode and required only for Live Text Analysis. Keep it in `api/.env`; that file is ignored. The backend defaults to `OPENAI_MODEL=gpt-5.6`, forces `OPENAI_STORE_RESPONSES=false`, and uses a 30-second timeout. Configure explicit comma-separated frontend origins with `MEANINGSYNC_CORS_ORIGINS`.
+`OPENAI_API_KEY` is optional for Demo Mode and required for Live analysis and Live teach-back comparison. Keep it in `api/.env`; that file is ignored. The backend defaults to `OPENAI_MODEL=gpt-5.6`, forces `OPENAI_STORE_RESPONSES=false`, and uses a 30-second timeout. Configure explicit comma-separated frontend origins with `MEANINGSYNC_CORS_ORIGINS`. `MEANINGSYNC_CLARIFICATION_ATTEMPT_LIMIT=3` bounds repeated clarification for one agreement item.
 
 In another terminal:
 
@@ -29,6 +29,18 @@ npm run dev
 ```
 
 Open `http://localhost:3000`. **Try Demo** starts the deterministic receipt flow. **Start Live Session** opens independent language setup and the English text workspace. Hindi is visible but disabled.
+
+## Guided Live Workflow
+
+Setup sits before the five-stage progress indicator. After both people choose English, Live Mode creates a server-owned session and follows:
+
+`Conversation → Clarify → Review → Confirm → Receipt`
+
+**Analyzing** is a dedicated, non-clickable state while MeaningSync moves from Conversation to Clarify or Review. The page shows one server-selected next action instead of asking users to interpret the lifecycle. Required issues are handled in a consistent order—scope, amount and price coverage, materials, timing, payment, then other critical responsibilities. A required issue may be resolved or carried forward only through an explicit **Continue unresolved** choice. Topics that were simply not discussed appear later as optional details and can be handled together rather than blocking the main path.
+
+The interface uses progressive disclosure: plain-language summaries and the next action appear first; original evidence, technical item keys, previous maps, and optional details stay available on demand. Same-device handoffs separate Homeowner and Electrician teach-back and confirmation, but do not provide authentication or strong privacy.
+
+Every analysis remains an immutable internal event. The user-facing Agreement Map version advances only when a deterministic semantic fingerprint shows a meaningful state or participant-position change, so retries, formatting differences, or neutral-summary wording alone do not create a noisy “new version.” Agreement versions, clarification messages, review status, confirmations, and the receipt are stored only in the FastAPI process. Refresh can recover while that process is still running; a restart loses the session and the UI reports that limitation truthfully.
 
 ## Verification
 
@@ -50,4 +62,6 @@ Normal tests mock OpenAI and spend no credits. `RUN_OPENAI_INTEGRATION=1 pytest 
 
 ## Status
 
-Implemented: deterministic English demo, in-memory sessions, English live text entry, backend Structured Outputs, evidence validation, and safe errors. Partially implemented: language-neutral data structures. Planned: audio and consent for audio, Hindi/translation, QR joining, persistence, separate live confirmations, and a live clarity receipt.
+Implemented: deterministic English demo; the guided five-stage English Live flow; server-derived next-action guidance; required-versus-optional issue handling; immutable internal agreement events with meaningful user-facing versions; exact, deduplicated clarification; same-device independent teach-backs; version-bound confirmations; and an immutable clarity-receipt snapshot with unresolved-item categories and an integrity hash.
+
+Partially implemented: language-neutral data structures, same-device privacy cues, and optional-detail batching within one session. Planned: validated usability research beyond the current first-click criteria, Hindi/translation, audio and recording consent, QR/separate-device joining, authentication, durable persistence and recovery, retention controls, custom PDF generation, and identity or signature verification.

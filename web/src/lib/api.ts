@@ -47,6 +47,62 @@ export type AnalysisErrorCode =
   | "provider_error";
 export type AnalysisStatus = "complete" | "partial";
 export type AnalysisWarningCode = "clarification_unavailable";
+export type LiveSessionStage =
+  | "conversation_draft"
+  | "analyzing"
+  | "needs_clarification"
+  | "ready_for_review"
+  | "awaiting_teachbacks"
+  | "awaiting_confirmations"
+  | "confirmed"
+  | "receipt_issued";
+export type ClarificationStatus =
+  | "pending"
+  | "answered"
+  | "resolved"
+  | "still_unresolved"
+  | "left_unresolved";
+export type ParticipantReviewStatus =
+  | "not_started"
+  | "reviewing"
+  | "teachback_submitted"
+  | "needs_clarification"
+  | "ready_to_confirm"
+  | "confirmed";
+export type TeachbackComparisonState =
+  | "matches"
+  | "partially_matches"
+  | "contradicts"
+  | "insufficient";
+export type ReceiptStatus = "fully_aligned" | "contains_unresolved_items";
+export type LiveUserStage =
+  | "conversation"
+  | "clarify"
+  | "review"
+  | "confirm"
+  | "receipt";
+export type LiveGuidanceAction =
+  | "answer_clarification"
+  | "leave_unresolved"
+  | "review_optional_details"
+  | "review_final_understanding"
+  | "submit_teachback"
+  | "submit_confirmation"
+  | "issue_receipt"
+  | "view_receipt";
+export type LiveErrorCode =
+  | "invalid_request"
+  | "invalid_state"
+  | "stale_agreement_version"
+  | "clarification_target_missing"
+  | "clarification_limit_reached"
+  | "participant_mismatch"
+  | "teachback_incomplete"
+  | "teachback_mismatch"
+  | "confirmation_missing"
+  | "confirmation_version_mismatch"
+  | "receipt_not_ready"
+  | "session_not_found";
 export type SessionStage =
   | "created"
   | "consent_pending"
@@ -127,9 +183,9 @@ export interface ClarificationAnswer {
 export interface SessionParticipant {
   id: PartyRole;
   role: PartyRole;
-  display_name: string;
+  display_name?: string;
   language: LanguageCode;
-  requested_display_language: LanguageCode;
+  requested_display_language?: LanguageCode;
 }
 
 export interface PartyConfirmation {
@@ -205,11 +261,213 @@ export interface AgreementAnalysisResponse {
   primary_clarification: ClarificationQuestion | null;
 }
 
+export interface AgreementVersion {
+  id: string;
+  version_number: number;
+  meaningful_version_number: number;
+  has_meaningful_change: boolean;
+  semantic_fingerprint: string;
+  parent_version_id: string | null;
+  session_id: string;
+  mode: "live";
+  created_at: string;
+  source_message_ids: string[];
+  terms: AgreementTerm[];
+  unresolved_item_keys: string[];
+  prompt_version: string;
+  schema_version: string;
+  model: string;
+  analysis_status: AnalysisStatus;
+  warnings: Array<{ code: AnalysisWarningCode; message: string }>;
+  primary_clarification: ClarificationQuestion | null;
+  changes: AgreementVersionChange[];
+  not_applicable_proposals: NotApplicableProposal[];
+}
+
+export interface LiveClarification {
+  id: string;
+  target_item_key: string;
+  target_agreement_version_id: string;
+  question: string;
+  answer_options: string[];
+  fingerprint: string;
+  semantic_target: string;
+  addressed_participant_ids: PartyRole[];
+  answers_received_from: PartyRole[];
+  responses_revealed: boolean;
+  response_message_ids: Partial<Record<PartyRole, string>>;
+  status: ClarificationStatus;
+  created_at: string;
+  resolved_at: string | null;
+  resulting_agreement_version_id: string | null;
+  attempt_number: number;
+}
+
+export interface TeachbackItemResult {
+  analysis_item_key: string;
+  state: TeachbackComparisonState;
+  agreement_summary: string;
+  feedback: string;
+}
+
+export interface LiveTeachback {
+  id: string;
+  participant_id: PartyRole;
+  agreement_version_id: string;
+  original_language: LanguageCode;
+  covered_item_keys: string[];
+  item_results: TeachbackItemResult[];
+  overall_state: TeachbackComparisonState;
+  missing_or_contradictory_summary: string | null;
+  follow_up_question: string | null;
+  acknowledged_unresolved_item_keys: string[];
+  created_at: string;
+}
+
+export interface LiveConfirmation {
+  id: string;
+  participant_id: PartyRole;
+  agreement_version_id: string;
+  teachback_id: string;
+  unresolved_item_acknowledgments: string[];
+  confirmed_at: string;
+  language: LanguageCode;
+  request_id: string;
+  invalidated_at: string | null;
+}
+
+export interface ParticipantReview {
+  participant_id: PartyRole;
+  status: ParticipantReviewStatus;
+  agreement_version_id: string;
+  teachback_id: string | null;
+}
+
+export interface AgreementVersionChange {
+  item_key: string;
+  label: string;
+  previous_state: MeaningState | null;
+  current_state: MeaningState | null;
+  resulting_meaning: string;
+  new_evidence_reference_ids: string[];
+}
+
+export interface LiveGuidance {
+  user_stage: LiveUserStage;
+  headline: string;
+  explanation: string;
+  primary_action: LiveGuidanceAction;
+  primary_label: string;
+  secondary_action: LiveGuidanceAction | null;
+  secondary_label: string | null;
+  required_issue_count: number;
+  optional_missing_count: number;
+  acting_participant: PartyRole | null;
+  active_clarification_id: string | null;
+  target_item_key: string | null;
+  required_item_keys: string[];
+  optional_item_keys: string[];
+}
+
+export interface LiveSessionView {
+  id: string;
+  stage: LiveSessionStage;
+  created_at: string;
+  participants: SessionParticipant[];
+  messages: AnalysisMessage[];
+  agreement_versions: AgreementVersion[];
+  current_agreement_version_id: string | null;
+  clarifications: LiveClarification[];
+  teachbacks: LiveTeachback[];
+  confirmations: LiveConfirmation[];
+  reviews: Partial<Record<PartyRole, ParticipantReview>>;
+  active_participant_id: PartyRole | null;
+  receipt_id: string | null;
+  receipt_ready: boolean;
+  clarification_attempt_limit: number;
+  guidance: LiveGuidance;
+}
+
+export interface ConfirmationStatusView {
+  session_id: string;
+  stage: LiveSessionStage;
+  current_agreement_version_id: string | null;
+  confirmations: LiveConfirmation[];
+  receipt_ready: boolean;
+}
+
+export interface LiveSessionCreate {
+  participants: [AnalysisParticipant, AnalysisParticipant];
+  messages: AnalysisMessage[];
+}
+
+export interface ReceiptParticipant {
+  participant_id: PartyRole;
+  role: PartyRole;
+  display_name: string;
+  language: LanguageCode;
+}
+
+export interface ReceiptConfirmation {
+  participant_id: PartyRole;
+  confirmation_id: string;
+  confirmed_at: string;
+  language: LanguageCode;
+}
+
+export interface ReceiptClarificationSummary {
+  clarification_id: string;
+  target_item_key: string;
+  target_agreement_version_id: string;
+  resulting_agreement_version_id: string | null;
+  response_message_ids: Partial<Record<PartyRole, string>>;
+  status: ClarificationStatus;
+}
+
+export interface NotApplicableProposal {
+  item_key: string;
+  label: string;
+  summary: string;
+  proposed_by: PartyRole[];
+}
+
+export interface ReceiptTeachbackStatus {
+  participant_id: PartyRole;
+  teachback_id: string;
+  result: TeachbackComparisonState;
+  completed_at: string;
+}
+
+export interface LiveClarityReceipt {
+  id: string;
+  session_id: string;
+  agreement_version_id: string;
+  agreement_version_number: number;
+  issued_at: string;
+  participants: ReceiptParticipant[];
+  aligned_terms: AgreementTerm[];
+  unresolved_terms: AgreementTerm[];
+  one_sided_terms: AgreementTerm[];
+  not_applicable_terms: NotApplicableProposal[];
+  not_discussed_terms: AgreementTerm[];
+  clarification_history: ReceiptClarificationSummary[];
+  teachback_status: ReceiptTeachbackStatus[];
+  confirmations: ReceiptConfirmation[];
+  status: ReceiptStatus;
+  application_version: string;
+  schema_version: string;
+  integrity_hash: string;
+  disclaimer: string;
+}
+
 export class MeaningSyncApiError extends Error {
   constructor(
     message: string,
-    readonly code: AnalysisErrorCode | "request_failed" = "request_failed",
+    readonly code: AnalysisErrorCode | LiveErrorCode | "request_failed" =
+      "request_failed",
     readonly retryable = false,
+    readonly status = 0,
+    readonly currentAgreementVersionId: string | null = null,
   ) {
     super(message);
     this.name = "MeaningSyncApiError";
@@ -229,7 +487,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const problem = (await response.json().catch(() => null)) as {
       detail?:
         | string
-        | { code?: AnalysisErrorCode; message?: string; retryable?: boolean };
+        | {
+            code?: AnalysisErrorCode | LiveErrorCode;
+            message?: string;
+            retryable?: boolean;
+            current_agreement_version_id?: string | null;
+          };
     } | null;
     const detail = problem?.detail;
     if (detail && typeof detail === "object") {
@@ -237,12 +500,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         detail.message ?? "MeaningSync could not complete that step.",
         detail.code,
         detail.retryable ?? false,
+        response.status,
+        detail.current_agreement_version_id ?? null,
       );
     }
     throw new MeaningSyncApiError(
       typeof detail === "string"
         ? detail
         : "MeaningSync could not complete that step.",
+      "request_failed",
+      response.status >= 500,
+      response.status,
     );
   }
   return response.json() as Promise<T>;
@@ -250,6 +518,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 const sessionPath = (sessionId: string) =>
   `/api/v1/demo/sessions/${sessionId}`;
+const liveSessionPath = (sessionId: string) =>
+  `/api/v1/live/sessions/${encodeURIComponent(sessionId)}`;
 
 export const api = {
   createDemo: (
@@ -299,4 +569,147 @@ export const api = {
       method: "POST",
       body: JSON.stringify(submission),
     }),
+  createLiveSession: (submission: LiveSessionCreate) =>
+    request<LiveSessionView>("/api/v1/live/sessions", {
+      method: "POST",
+      body: JSON.stringify(submission),
+    }),
+  getLiveSession: (sessionId: string) =>
+    request<LiveSessionView>(liveSessionPath(sessionId)),
+  analyzeLiveSession: (sessionId: string) =>
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/analysis`, {
+      method: "POST",
+      body: JSON.stringify({ expected_agreement_version_id: null }),
+    }),
+  listAgreementVersions: (sessionId: string) =>
+    request<AgreementVersion[]>(
+      `${liveSessionPath(sessionId)}/agreement-versions`,
+    ),
+  getAgreementVersion: (sessionId: string, versionId: string) =>
+    request<AgreementVersion>(
+      `${liveSessionPath(sessionId)}/agreement-versions/${encodeURIComponent(versionId)}`,
+    ),
+  addLiveStatements: (
+    sessionId: string,
+    submission: {
+      expected_agreement_version_id: string;
+      messages: AnalysisMessage[];
+      request_id: string;
+    },
+  ) =>
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/statements`, {
+      method: "POST",
+      body: JSON.stringify(submission),
+    }),
+  proposeNotApplicable: (
+    sessionId: string,
+    submission: {
+      expected_agreement_version_id: string;
+      participant_id: PartyRole;
+      item_key: string;
+      request_id: string;
+    },
+  ) =>
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/not-applicable`, {
+      method: "POST",
+      body: JSON.stringify(submission),
+    }),
+  submitLiveClarificationAnswer: (
+    sessionId: string,
+    clarificationId: string,
+    submission: {
+      participant_id: PartyRole;
+      answer: string;
+      expected_agreement_version_id: string;
+      request_id: string;
+    },
+  ) =>
+    request<LiveSessionView>(
+      `${liveSessionPath(sessionId)}/clarifications/${encodeURIComponent(clarificationId)}/answers`,
+      { method: "POST", body: JSON.stringify(submission) },
+    ),
+  leaveLiveClarificationUnresolved: (
+    sessionId: string,
+    clarificationId: string,
+    submission: {
+      expected_agreement_version_id: string;
+      request_id: string;
+    },
+  ) =>
+    request<LiveSessionView>(
+      `${liveSessionPath(sessionId)}/clarifications/${encodeURIComponent(clarificationId)}/leave-unresolved`,
+      { method: "POST", body: JSON.stringify(submission) },
+    ),
+  reviewOptionalDetails: (
+    sessionId: string,
+    submission: {
+      expected_agreement_version_id: string;
+      request_id: string;
+    },
+  ) =>
+    request<LiveSessionView>(
+      `${liveSessionPath(sessionId)}/optional-details/reviewed`,
+      { method: "POST", body: JSON.stringify(submission) },
+    ),
+  submitTeachback: (
+    sessionId: string,
+    submission: {
+      participant_id: PartyRole;
+      text: string;
+      original_language: LanguageCode;
+      expected_agreement_version_id: string;
+      acknowledged_unresolved_item_keys: string[];
+      request_id: string;
+    },
+  ) =>
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/teachbacks`, {
+      method: "POST",
+      body: JSON.stringify(submission),
+    }),
+  submitLiveConfirmation: (
+    sessionId: string,
+    submission: {
+      participant_id: PartyRole;
+      expected_agreement_version_id: string;
+      teachback_id: string;
+      decision: "confirm" | "request_change";
+      unresolved_item_acknowledgments: string[];
+      change_item_key?: string;
+      request_id: string;
+    },
+  ) =>
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/confirmations`, {
+      method: "POST",
+      body: JSON.stringify(submission),
+    }),
+  getLiveConfirmationStatus: (sessionId: string) =>
+    request<ConfirmationStatusView>(
+      `${liveSessionPath(sessionId)}/confirmation-status`,
+    ),
+  beginLiveReview: (
+    sessionId: string,
+    submission: {
+      expected_agreement_version_id: string;
+      acknowledged_unresolved_item_keys: string[];
+      request_id: string;
+    },
+  ) =>
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/review`, {
+      method: "POST",
+      body: JSON.stringify(submission),
+    }),
+  issueLiveReceipt: (
+    sessionId: string,
+    expectedAgreementVersionId: string,
+    requestId: string,
+  ) =>
+    request<LiveClarityReceipt>(`${liveSessionPath(sessionId)}/receipt`, {
+      method: "POST",
+      body: JSON.stringify({
+        expected_agreement_version_id: expectedAgreementVersionId,
+        request_id: requestId,
+      }),
+    }),
+  getLiveReceipt: (sessionId: string) =>
+    request<LiveClarityReceipt>(`${liveSessionPath(sessionId)}/receipt`),
 };

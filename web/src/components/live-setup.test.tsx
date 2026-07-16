@@ -30,7 +30,7 @@ describe("LiveSetup", () => {
     render(<LiveSetup />);
 
     fireEvent.click(
-      screen.getByRole("button", { name: /Continue to conversation/ }),
+      screen.getByRole("button", { name: /^Continue/ }),
     );
     expect(push).toHaveBeenCalledWith(
       "/live?hirer_language=en&worker_language=en",

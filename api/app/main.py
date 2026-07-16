@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from app.api.analysis import router as analysis_router
+from app.api.live_sessions import router as live_sessions_router
 from app.api.sessions import router as sessions_router
 from app.config import cors_origins
 from app.schemas.analysis import (
@@ -12,11 +13,16 @@ from app.schemas.analysis import (
     AnalysisErrorDetail,
     AnalysisErrorResponse,
 )
+from app.schemas.workflow import (
+    WorkflowErrorCode,
+    WorkflowErrorDetail,
+    WorkflowErrorResponse,
+)
 
 app = FastAPI(
     title="MeaningSync API",
     description="Deterministic demo and OpenAI-powered live agreement analysis.",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -28,6 +34,7 @@ app.add_middleware(
 )
 app.include_router(sessions_router)
 app.include_router(analysis_router)
+app.include_router(live_sessions_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -39,6 +46,15 @@ async def controlled_request_validation(
             detail=AnalysisErrorDetail(
                 code=AnalysisErrorCode.INVALID_REQUEST,
                 message="The agreement-analysis request is invalid.",
+                retryable=False,
+            )
+        )
+        return JSONResponse(status_code=422, content=problem.model_dump(mode="json"))
+    if request.url.path.startswith("/api/v1/live/sessions"):
+        problem = WorkflowErrorResponse(
+            detail=WorkflowErrorDetail(
+                code=WorkflowErrorCode.INVALID_REQUEST,
+                message="The Live session request is invalid.",
                 retryable=False,
             )
         )

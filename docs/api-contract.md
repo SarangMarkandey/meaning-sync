@@ -2,7 +2,7 @@
 
 All implemented endpoints are JSON under `/api/v1`. `GET /health` returns service status.
 
-## Live Agreement Analysis
+## Standalone Agreement Analysis
 
 `POST /api/v1/agreements/analyze` accepts Live Mode, exactly one hirer and one worker, and 2–40 ordered English messages:
 
@@ -25,9 +25,23 @@ The response includes `prompt_version`, configured `model`, `status` (`complete`
 
 Atomic keys prevent adjacent meanings from being merged. For example, agreement on `price.amount` remains aligned when the parties conflict on `materials.inclusion`.
 
-A valid map with an unusable clarification returns HTTP 200, `status: "partial"`, no `primary_clarification`, and warning code `clarification_unavailable`. The UI preserves the map and displays: “The agreement map is ready, but a clarification question could not be generated. Review the highlighted conflict.”
+A valid map with an unusable clarification returns HTTP 200, `status: "partial"`, no `primary_clarification`, and warning code `clarification_unavailable`. Invalid core output remains a controlled upstream-analysis error.
 
 HTTP 502 is reserved for invalid core model output or evidence. Errors use a controlled shape: `{"detail":{"code":"invalid_model_output","message":"…","retryable":true}}`. Other codes cover invalid requests/configuration/API keys, rate limits, timeout, connection failure, refusal, and provider failure. Provider details are not returned.
+
+## Server-Owned Live Sessions
+
+The complete product flow uses `/api/v1/live/sessions`, not browser-owned state. It supports session creation/reload, initial analysis, immutable agreement-version listing/retrieval, separately submitted clarification answers, additional statements, not-applicable proposals, review start, actor-bound teach-backs, separate version-bound confirmations, confirmation status, and clarity-receipt issue/retrieval. The complete route and body reference is in [Live Session API](api.md).
+
+Every `LiveSessionView` includes a `guidance` object. It gives the browser the five-stage `user_stage`, plain-language headline/explanation, primary and optional secondary action/label, required and optional counts/item keys, acting participant, active clarification ID, and exact target item key. Setup is outside the stage list; the lower-level `analyzing` lifecycle value maps to a transient status within the move from Conversation to Clarify or Review. Clients render guidance instead of deriving the next action from old clarification records or term-array order.
+
+Every applicable write includes `expected_agreement_version_id`; a stale write returns HTTP 409 and the current ID. Mutation bodies also carry `request_id` for idempotent retries. The first clarification response is not revealed until both parties answer. A successful re-analysis creates a child snapshot rather than replacing v1. Any newer agreement version invalidates old confirmations.
+
+Agreement snapshots expose internal `version_number`, user-facing `meaningful_version_number`, `semantic_fingerprint`, and `has_meaningful_change`. Internal order advances for each successful validated analysis. The meaningful number advances only when normalized agreement meaning changes, so operational retries do not create a misleading map version. Clarification records similarly expose `fingerprint` and `semantic_target` for exact-target deduplication.
+
+Guidance classifies conflicting and critical one-sided items as required; they must be answered or explicitly left unresolved. Optional not-discussed items are returned separately and may be submitted together through the existing multi-message statement operation. A unilateral not-applicable proposal remains visible and does not count as shared meaning.
+
+Live teach-back uses the backend OpenAI evaluator and Structured Outputs. It never calls OpenAI from the browser or falls back to a fixture. Both current, matching teach-backs and both current confirmations are required before receipt issuance.
 
 ## Deterministic Demo Sessions
 
@@ -45,4 +59,4 @@ All paths above are relative to `/api/v1/demo/sessions`. First clarification ans
 
 ## Status
 
-Implemented: the live endpoint and deterministic routes. Partially implemented: `hi` exists in shared language models but live requests reject it. Planned: audio, translation, authentication, persistence, device joining, and live clarity-receipt endpoints. MeaningSync does not provide legal advice.
+Implemented: standalone analysis, server-owned Live workflow, deterministic Demo routes, and Live clarity receipt. Partially implemented: `hi` exists in shared language models but Live requests reject it; session recovery works only while the same FastAPI process retains memory. Planned: audio, translation, authentication, durable persistence, and separate-device joining. MeaningSync does not provide legal advice, and its clarity receipt is not a legal contract.

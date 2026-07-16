@@ -145,3 +145,59 @@ Verification:
 - `git diff --check`: passed.
 
 No OpenAI request—paid or otherwise—ran during this repair. The implementation is ready for exactly one separately authorized paid verification.
+
+## Milestone 4 — Clarification, Confirmation, and Clarity Receipt
+
+**Date:** 2026-07-16
+
+- Replaced the stateless Live result with a server-owned in-memory lifecycle from conversation draft through analysis, exact clarification, independent teach-backs, separate confirmations, and receipt issuance.
+- Added immutable, monotonically numbered agreement snapshots. Clarification answers and additional statements append immutable speaker-attributed messages; successful re-analysis creates a child version instead of overwriting the prior map.
+- Added optimistic agreement-version checks, request-ID idempotency, actor-bound same-device handoffs, and automatic invalidation of confirmations when a newer version is created.
+- Kept the first clarification answer hidden until the second participant submits. The resulting answers are re-analyzed through the configured Live analyzer with no deterministic fallback; repeated attempts are bounded by `MEANINGSYNC_CLARIFICATION_ATTEMPT_LIMIT`.
+- Added backend-only Structured Outputs teach-back comparison with `matches`, `partially_matches`, `contradicts`, and `insufficient` states. Partial responses receive a focused follow-up; contradictions reopen the exact agreement item.
+- Added separate, version- and teach-back-bound confirmation records plus an immutable receipt containing aligned, conflicting, one-sided, not-applicable, and not-discussed categories, clarification history, both confirmation timestamps, the required disclaimer, and a deterministic payload-change hash.
+- Added Live session, agreement-version, clarification, statement, not-applicable, review, teach-back, confirmation-status, and receipt JSON endpoints plus controlled lifecycle, stale-version, participant, and readiness errors.
+- Added the same-device Live workflow and receipt routes with progress, version comparison, handoff privacy cues, unresolved-item acknowledgment, print/save through browser printing, and truthful missing-session recovery.
+
+Verification status:
+
+- Pre-implementation baseline passed: backend formatting/lint, 38 backend tests with 12 paid cases skipped, FastAPI import, frontend lint/type-check, 21 frontend tests, and production build.
+- `ruff format --check .` and `ruff check .`: passed across 37 Python files.
+- `pytest -ra`: 61 passed; 12 real-OpenAI evaluation cases skipped by default because they consume API credits.
+- FastAPI import and OpenAPI generation: passed with 13 Live session paths.
+- `npm run lint`, `npm run type-check`, and `npm test -- --run`: passed; 35 frontend tests passed across 8 files.
+- `npm run build`: passed with `/live`, `/live/[sessionId]`, and `/live/[sessionId]/receipt` included in the production route output.
+- Real-browser verification covered 16 required Live states at 1440×900, 1024×768, 768×1024, 390×844, and 360×800 (80 captures). Every capture had viewport-width content with no horizontal overflow or clipped controls. Desktop, tablet, and mobile spot checks confirmed readable handoffs, hidden-first-answer treatment, version comparison, confirmations, and both receipt statuses.
+- Browser interaction exercised create, analyze, exact clarification, hidden first response, immutable v2, separate teach-backs, separate confirmations, receipt issuance, contradiction reopening, stale-version recovery, and missing-session recovery. No CSS, hydration, React, or runtime exceptions appeared; the only browser network errors were the intentionally exercised `409` stale-version and `404` missing-session responses.
+- `git diff --check`: passed after the final documentation update.
+- No paid OpenAI request ran during this milestone implementation. Normal and UI tests use deterministic or mocked analyzers/evaluators.
+
+Current limits: sessions and receipts disappear on backend restart; same-device handoff is not authentication or strong privacy; English text only; no audio, QR joining, separate devices, database, identity verification, electronic signature, custom PDF, or legal-contract status.
+
+## Guided Live Workflow and Meaningful Versions
+
+**Date:** 2026-07-17
+
+- Simplified the user-visible Live journey to five stable stages: Conversation, Clarify, Review, Confirm, and Receipt. Setup remains before progress; analyzing is a dedicated transient state during the move out of Conversation.
+- Added server-derived guidance for the current user stage, one primary action, optional secondary action, acting participant, exact clarification target, and required/optional item sets. The browser no longer needs to infer the next step from stale clarification history.
+- Defined deterministic required-issue priority as scope, amount and price coverage, materials, timing, payment, then other critical responsibility, with stable agreement-item ordering for ties.
+- Added exact-target clarification fingerprints and deduplication so equivalent active questions are reused while distinct atomic meanings remain separate.
+- Separated immutable internal analysis events from meaningful user-facing Agreement Map versions. The semantic fingerprint includes normalized state, participant positions and statuses, evidence-backed missing-to-stated transitions, and mutually acknowledged not-applicable treatment while excluding neutral-summary wording, IDs, timestamps, and provider metadata.
+- Kept required conflicts and critical one-sided meanings blocking until resolved or explicitly carried unresolved. Grouped ordinary not-discussed topics under progressively disclosed optional details, with one deliberate multi-message batch available instead of a forced request per topic.
+- Preserved same-device handoffs for hidden clarification responses, separate teach-backs, and separate confirmations. The UI continues to state that this is not authentication or strong privacy.
+- Added first-click criteria: one obvious primary action, safe Back behavior, evidence on demand, no navigation-as-consent, duplicate-submit prevention during loading, and truthful stale/missing-session recovery.
+- Updated the product, architecture, API, analysis, clarification, receipt, language, privacy, OpenAI, evaluation, roadmap, and setup documentation without removing the historical Milestone 4 record.
+
+Final verification results:
+
+- `ruff format --check .` and `ruff check .`: passed across 39 Python files.
+- `pytest -ra`: 70 passed; 12 real-OpenAI evaluation cases skipped because they are opt-in and consume API credits.
+- FastAPI import and OpenAPI generation: passed with 25 paths.
+- `npm run lint`, `npm run type-check`, and `npm test -- --run`: passed; 40 frontend tests passed across 8 files.
+- `npm run build`: passed with 8 application routes, including the dynamic Live session and receipt routes.
+- Production Chrome exercised 18 states from language setup through receipt, plus missing-session and stale-version recovery, at 1440×900, 1024×768, 768×1024, 390×844, and 360×800. The audit produced 90 viewport checks and 126 screenshots.
+- The exact Agreement Map v5 fixture rendered 4 matching meanings, 1 required scope answer, and 5 optional not-discussed details. Every tested screen exposed one clear primary action or an intentional analyzing state.
+- Browser checks found no horizontal overflow, clipped interactive controls, unlabeled form controls, raw internal terminology, CSS/hydration/React exceptions, or unexpected console errors. The only resource errors were the intentionally exercised `404` missing-session and `409` stale-version responses.
+- Visual inspection covered setup, conversation, analyzing, summary, clarification, resolved outcome, optional details, final review, both private teach-backs, both confirmations, receipt-ready, receipt, expanded integrity details, missing session, and stale version on desktop and mobile.
+- Browser verification exposed and fixed a stale local Review view after starting teach-back; validated provider questions without choices now retain application-owned safe options.
+- `git diff --check`: passed. No paid OpenAI request ran during implementation or verification; the browser harness blocked OpenAI client creation and used deterministic local fixtures.
