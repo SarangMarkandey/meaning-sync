@@ -1,18 +1,18 @@
-from datetime import date
+import asyncio
 
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.main import app
-from app.schemas.session import (
+from app.schemas.analysis import (
     AgreementTerm,
+    AgreementTopic,
     LanguageCode,
-    ParticipantLanguages,
+    MeaningState,
     ParticipantTermStatus,
-    SessionStage,
-    TermStatus,
 )
+from app.schemas.session import ParticipantLanguages, SessionStage
 from app.services.sessions import SessionService
 
 
@@ -30,9 +30,14 @@ class TranslationSpy:
         return f"translated: {original_text}"
 
 
+def analyze(service: SessionService, session_id: str):
+    return asyncio.run(service.analyze(session_id))
+
+
 def test_required_routes_are_registered() -> None:
     routes = set(app.openapi()["paths"])
     assert "/health" in routes
+    assert "/api/v1/agreements/analyze" in routes
     assert "/api/v1/demo/sessions" in routes
     assert "/api/v1/demo/sessions/{session_id}" in routes
     assert "/api/v1/demo/sessions/{session_id}/receipt" in routes
@@ -91,6 +96,7 @@ def test_original_message_and_speaker_provenance_are_preserved(
     assert first.participant_id == "hirer"
     assert first.speaker_name == "Homeowner"
     assert first.original_language == LanguageCode.ENGLISH
+    assert first.order == 1
     assert first.original_text == (
         "I will pay ₹1,200 for repairing the fan and two switches, "
         "including replacement parts."
@@ -103,7 +109,7 @@ def test_state_transitions_cannot_be_skipped(service: SessionService) -> None:
     assert created.stage == SessionStage.CREATED
 
     with pytest.raises(HTTPException, match="Expected stage discussion"):
-        service.analyze(created.id)
+        analyze(service, created.id)
 
     first_consent = service.submit_consent(created.id, "hirer", True)
     assert first_consent.stage == SessionStage.CONSENT_PENDING
@@ -114,64 +120,73 @@ def test_state_transitions_cannot_be_skipped(service: SessionService) -> None:
         service.begin_clarification(created.id)
 
 
-def test_english_agreement_meaning_and_evidence(
+def test_deterministic_agreement_meaning_and_evidence(
     service: SessionService, discussion_session: str
 ) -> None:
-    analyzed = service.analyze(discussion_session)
-    terms = {term.id: term for term in analyzed.terms}
+    analyzed = analyze(service, discussion_session)
+    terms = {term.topic: term for term in analyzed.terms}
 
-    assert terms["fan-repair"].status == TermStatus.CONFIRMED
-    assert terms["switch-repair"].status == TermStatus.CONFIRMED
-    assert terms["labour-price"].value == "₹1,200"
-    assert terms["materials"].status == TermStatus.CONFLICT
-    assert "included" in (terms["materials"].value or "")
-    assert terms["start-date"].status == TermStatus.CONFIRMED
-    assert terms["start-date"].value == date.today().isoformat()
+    assert terms[AgreementTopic.SCOPE].state == MeaningState.STATED_BY_ONE
+    assert terms[AgreementTopic.PRICE].state == MeaningState.ALIGNED
+    assert "₹1,200" in terms[AgreementTopic.PRICE].summary
+    assert terms[AgreementTopic.MATERIALS].state == MeaningState.CONFLICTING
+    assert "disagree" in terms[AgreementTopic.MATERIALS].summary
+    assert terms[AgreementTopic.TIMING].state == MeaningState.ALIGNED
 
     for term in analyzed.terms:
-        if term.status != TermStatus.MISSING:
+        if term.state != MeaningState.NOT_DISCUSSED:
             assert term.evidence
+            assert term.evidence_message_ids
             assert all(evidence.message_id for evidence in term.evidence)
             assert all(evidence.original_text for evidence in term.evidence)
-            assert all(evidence.participant_id for evidence in term.evidence)
+            assert all(evidence.original_language == "en" for evidence in term.evidence)
 
 
-def test_missing_terms_remain_separate_from_conflicts(
+def test_not_discussed_terms_remain_separate_from_conflicts(
     service: SessionService, discussion_session: str
 ) -> None:
-    analyzed = service.analyze(discussion_session)
-    missing_ids = {term.id for term in analyzed.terms if term.status == "missing"}
-    conflict_ids = {term.id for term in analyzed.terms if term.status == "conflict"}
-    assert missing_ids == {
-        "completion-time",
-        "payment-timing",
-        "warranty",
-        "additional-work",
+    analyzed = analyze(service, discussion_session)
+    not_discussed = {
+        term.topic
+        for term in analyzed.terms
+        if term.state == MeaningState.NOT_DISCUSSED
     }
-    assert conflict_ids == {"materials"}
+    conflicts = {
+        term.topic for term in analyzed.terms if term.state == MeaningState.CONFLICTING
+    }
+    assert {
+        AgreementTopic.COMPLETION,
+        AgreementTopic.PAYMENT,
+        AgreementTopic.WARRANTY,
+        AgreementTopic.ADDITIONAL_WORK,
+    }.issubset(not_discussed)
+    assert conflicts == {AgreementTopic.MATERIALS}
 
 
 def test_neutral_materials_clarification_is_generated(
     service: SessionService, discussion_session: str
 ) -> None:
-    analyzed = service.analyze(discussion_session)
+    analyzed = analyze(service, discussion_session)
     question = analyzed.clarification_questions[0]
-    assert question.term_id == "materials"
+    assert question.target == AgreementTopic.MATERIALS
     assert "include replacement parts" in question.prompt
     assert "charged separately" in question.prompt
 
 
-def test_non_missing_terms_require_provenance() -> None:
+def test_discussed_terms_require_provenance() -> None:
     participant_status = {
         "hirer": ParticipantTermStatus.CONFIRMED,
         "worker": ParticipantTermStatus.CONFIRMED,
     }
-    with pytest.raises(ValidationError, match="require evidence"):
+    with pytest.raises(ValidationError, match="require transcript evidence"):
         AgreementTerm(
             id="invalid",
+            analysis_item_key="scope.work",
+            topic=AgreementTopic.SCOPE,
+            facet="work",
             label="Invalid inferred term",
-            status=TermStatus.CONFIRMED,
-            value="inferred",
+            summary="Inferred without support.",
+            state=MeaningState.ALIGNED,
             participant_confirmations=participant_status,
         )
 
@@ -181,7 +196,7 @@ def test_first_clarification_answer_is_hidden(
 ) -> None:
     first = service.answer(
         clarification_session,
-        "materials-inclusion",
+        "clarify-materials",
         "hirer",
         "Parts are included",
     )
@@ -190,14 +205,14 @@ def test_first_clarification_answer_is_hidden(
 
     second = service.answer(
         clarification_session,
-        "materials-inclusion",
+        "clarify-materials",
         "worker",
         "Parts are charged separately",
     )
     assert second.revealed is True
     assert second.resolved is False
     assert second.term is not None
-    assert second.term.status == TermStatus.CONFLICT
+    assert second.term.state == MeaningState.CONFLICTING
 
 
 def test_semantically_compatible_answers_resolve_materials(
@@ -205,14 +220,14 @@ def test_semantically_compatible_answers_resolve_materials(
 ) -> None:
     first = service.answer(
         clarification_session,
-        "materials-inclusion",
+        "clarify-materials",
         "hirer",
         "Parts are charged separately",
     )
     assert first.revealed is False
     second = service.answer(
         clarification_session,
-        "materials-inclusion",
+        "clarify-materials",
         "worker",
         "Replacement parts are separate",
     )
@@ -220,7 +235,7 @@ def test_semantically_compatible_answers_resolve_materials(
     assert second.answers[0].answer != second.answers[1].answer
     assert second.answers[0].meaning == second.answers[1].meaning
     assert second.term is not None
-    assert second.term.status == TermStatus.CONFIRMED
+    assert second.term.state == MeaningState.ALIGNED
 
 
 def test_two_party_confirmation_and_receipt_preserve_gaps(
@@ -228,13 +243,13 @@ def test_two_party_confirmation_and_receipt_preserve_gaps(
 ) -> None:
     service.answer(
         clarification_session,
-        "materials-inclusion",
+        "clarify-materials",
         "hirer",
         "Parts are included",
     )
     service.answer(
         clarification_session,
-        "materials-inclusion",
+        "clarify-materials",
         "worker",
         "Parts are charged separately",
     )
@@ -255,7 +270,7 @@ def test_two_party_confirmation_and_receipt_preserve_gaps(
     assert second.stage == SessionStage.CONFIRMATION
 
     receipt = service.create_receipt(clarification_session)
-    statuses = {term.id: term.status for term in receipt.terms}
-    assert statuses["materials"] == TermStatus.CONFLICT
-    assert statuses["completion-time"] == TermStatus.MISSING
+    states = {term.topic: term.state for term in receipt.terms}
+    assert states[AgreementTopic.MATERIALS] == MeaningState.CONFLICTING
+    assert states[AgreementTopic.COMPLETION] == MeaningState.NOT_DISCUSSED
     assert len(receipt.confirmations) == 2

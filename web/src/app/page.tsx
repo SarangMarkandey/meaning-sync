@@ -22,10 +22,10 @@ export default function Home() {
             <Link className="button primary" href="/demo/setup">
               Try Demo <span>→</span>
             </Link>
-            <button className="button secondary" disabled>
+            <Link className="button secondary" href="/live/setup">
               Start Live Session
-              <small>Next milestone</small>
-            </button>
+              <small>English text preview</small>
+            </Link>
           </div>
         </div>
         <div className="meaning-preview" aria-label="Agreement map preview">

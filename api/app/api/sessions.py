@@ -36,7 +36,7 @@ async def submit_consent(session_id: str, submission: ConsentSubmission) -> Sess
 
 @router.post("/{session_id}/analysis", response_model=SessionView)
 async def analyze_demo_session(session_id: str) -> SessionView:
-    return session_service.analyze(session_id)
+    return await session_service.analyze(session_id)
 
 
 @router.post("/{session_id}/clarifications", response_model=SessionView)

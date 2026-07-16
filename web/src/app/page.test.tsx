@@ -12,16 +12,17 @@ describe("MeaningSync landing page", () => {
     expect(screen.queryByText("English-first milestone")).not.toBeInTheDocument();
   });
 
-  it("routes Try Demo to setup and keeps Live Mode disabled", () => {
+  it("routes Demo and Live actions to their setup flows", () => {
     render(<Home />);
 
     expect(screen.getByRole("link", { name: /Try Demo/ })).toHaveAttribute(
       "href",
       "/demo/setup",
     );
-    expect(
-      screen.getByRole("button", { name: /Start Live Session/ }),
-    ).toBeDisabled();
+    expect(screen.getByRole("link", { name: /Start Live Session/ })).toHaveAttribute(
+      "href",
+      "/live/setup",
+    );
     expect(screen.getByLabelText("Agreement map preview")).toBeVisible();
   });
 });
