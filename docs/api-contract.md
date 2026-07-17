@@ -2,7 +2,7 @@
 
 All implemented endpoints are JSON under `/api/v1`. `GET /health` returns service status.
 
-## Live Agreement Analysis
+## Standalone Agreement Analysis
 
 `POST /api/v1/agreements/analyze` accepts Live Mode, exactly one hirer and one worker, and 2–40 ordered English messages:
 
@@ -25,9 +25,23 @@ The response includes `prompt_version`, configured `model`, `status` (`complete`
 
 Atomic keys prevent adjacent meanings from being merged. For example, agreement on `price.amount` remains aligned when the parties conflict on `materials.inclusion`.
 
-A valid map with an unusable clarification returns HTTP 200, `status: "partial"`, no `primary_clarification`, and warning code `clarification_unavailable`. The UI preserves the map and displays: “The agreement map is ready, but a clarification question could not be generated. Review the highlighted conflict.”
+A valid map with an unusable clarification returns HTTP 200, `status: "partial"`, no `primary_clarification`, and warning code `clarification_unavailable`. Invalid core output remains a controlled upstream-analysis error.
 
 HTTP 502 is reserved for invalid core model output or evidence. Errors use a controlled shape: `{"detail":{"code":"invalid_model_output","message":"…","retryable":true}}`. Other codes cover invalid requests/configuration/API keys, rate limits, timeout, connection failure, refusal, and provider failure. Provider details are not returned.
+
+## Server-Owned Live Sessions
+
+The complete product flow uses `/api/v1/live/sessions`, not browser-owned state. It supports session creation/reload, initial analysis, immutable agreement-version listing/retrieval, choice-based clarification, additional statements, not-applicable proposals, server-selected understanding questions, private participant selections, separate version-bound confirmations, confirmation status, and clarity-receipt issue/retrieval. The complete route and body reference is in [Live Session API](api.md).
+
+Every `LiveSessionView` includes a `guidance` object. It gives the browser the five-stage `user_stage` (`conversation`, `clarify`, `check_understanding`, `confirm`, or `receipt`), plain-language headline/explanation, primary and optional secondary action/label, required and optional counts/item keys, acting participant, active question, and exact target item key. Setup is outside the stage list; the lower-level `analyzing` lifecycle value maps to a transient status within the move out of Conversation. Clients render guidance instead of deriving the next action from old clarification records or term-array order.
+
+Every applicable write includes `expected_agreement_version_id`; a stale write returns HTTP 409 and the current ID. Mutation bodies also carry `request_id` for idempotent retries. `POST /{session_id}/questions/{question_id}/selections` accepts the acting `participant_id`, backend-owned `option_id`, optional `other_text`, request ID, and expected version. The backend validates the session, participant, question, item, version, and option together. A pending selection is not returned to the browser until every addressed participant has answered; for a two-person question, the first remains hidden before the second submits. A successful meaning change creates a child snapshot rather than replacing v1. Any newer agreement version invalidates old confirmations.
+
+Agreement snapshots expose internal `version_number`, user-facing `meaningful_version_number`, `semantic_fingerprint`, and `has_meaningful_change`. Internal order advances for each successful validated analysis. The meaningful number advances only when normalized agreement meaning changes, so operational retries do not create a misleading map version. Question records bind a stable item ID and normalized semantic commitment so wording changes do not create a duplicate question.
+
+Guidance classifies conflicting and critical one-sided items as required; they must be answered or explicitly left unresolved. Optional not-discussed items are returned separately and may be submitted together through the existing multi-message statement operation. A unilateral not-applicable proposal remains visible and does not count as shared meaning.
+
+`UnderstandingQuestion` unifies `clarification` and `understanding_check` kinds. Its public `UnderstandingOption` values expose stable IDs and labels with `recorded_position`, `recorded_meaning`, `other`, or `unsure` kinds; semantic values remain server-owned. Check understanding uses deterministic backend construction and outcome rules. A current meaning with completed two-party clarification receives at most one additional high-impact question; without clarification, simple agreements normally receive one or two and broad agreements receive at most three. Completed clarification evidence suppresses the same semantic question. Outcomes are `aligned`, `meaning_changed`, `different`, `unsure`, or `left_unresolved`: matching recorded meaning completes a check; matching alternative meaning enters the immutable version-change flow; different meanings return only the affected item to clarification; `other` requires 2–280 characters of text; and `unsure` cannot create alignment. Receipt readiness requires all applicable current-version checks to be complete or deliberately left unresolved, followed by both current confirmations. Confirmations bind `understanding_review_id`, and receipts expose `understanding_status`. These records show independent selections, not proven comprehension or consent.
 
 ## Deterministic Demo Sessions
 
@@ -45,4 +59,4 @@ All paths above are relative to `/api/v1/demo/sessions`. First clarification ans
 
 ## Status
 
-Implemented: the live endpoint and deterministic routes. Partially implemented: `hi` exists in shared language models but live requests reject it. Planned: audio, translation, authentication, persistence, device joining, and live clarity-receipt endpoints. MeaningSync does not provide legal advice.
+Implemented: standalone analysis, server-owned Live workflow, deterministic Demo routes, and Live clarity receipt. Partially implemented: `hi` exists in shared language models but Live requests reject it; session recovery works only while the same FastAPI process retains memory. Planned: audio, translation, authentication, durable persistence, and separate-device joining. MeaningSync does not provide legal advice, and its clarity receipt is not a legal contract.

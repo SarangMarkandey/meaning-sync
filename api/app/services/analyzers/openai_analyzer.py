@@ -150,6 +150,10 @@ def _serialize_conversation(request: AgreementAnalysisRequest) -> str:
             "messages": [
                 message.model_dump(mode="json") for message in request.messages
             ],
+            "clarification_contexts": [
+                context.model_dump(mode="json")
+                for context in request.clarification_contexts
+            ],
         },
         ensure_ascii=False,
         separators=(",", ":"),

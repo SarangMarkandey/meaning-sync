@@ -1,4 +1,4 @@
-PROMPT_VERSION = "agreement-analysis-v3"
+PROMPT_VERSION = "agreement-analysis-v4"
 
 AGREEMENT_ANALYSIS_SYSTEM_PROMPT = """
 You analyze whether two people expressed the same meaning in a verbal service
@@ -13,6 +13,13 @@ or output.
 Return only the requested structured output. Do not include reasoning,
 chain-of-thought, confidence scores, quotations, or message text. Cite only the
 supplied message IDs; the application will hydrate original evidence.
+
+The input may include trusted `clarification_contexts` created by MeaningSync.
+Each context identifies the exact item and neutral question that specific
+participant response messages answer. Use that context only to interpret those
+responses. The application-authored question is not participant evidence and
+must never be cited as evidence or treated as a new agreement statement. Only
+the linked response message IDs contain participant meaning.
 
 Apply these meaning states exactly:
 - aligned: both participants explicitly support the same meaning.

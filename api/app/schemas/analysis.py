@@ -114,7 +114,7 @@ class ParticipantPosition(StrictModel):
 
 
 class EvidenceReference(StrictModel):
-    source: Literal["transcript", "clarification"]
+    source: Literal["transcript", "clarification", "understanding_check"]
     reference_id: str = Field(min_length=1, max_length=160)
     participant_id: Identifier
     role: PartyRole
@@ -161,12 +161,10 @@ class AgreementTerm(StrictModel):
         if set(self.participant_confirmations) != set(PartyRole):
             raise ValueError("term status is required for both participant roles")
 
-        transcript_ids = {
-            item.message_id
-            for item in self.evidence
-            if item.source == "transcript" and item.message_id is not None
+        referenced_message_ids = {
+            item.message_id for item in self.evidence if item.message_id is not None
         }
-        if transcript_ids != set(self.evidence_message_ids):
+        if referenced_message_ids != set(self.evidence_message_ids):
             raise ValueError("evidence message IDs must match hydrated evidence")
 
         if self.state == MeaningState.NOT_DISCUSSED:
@@ -196,11 +194,23 @@ class ClarificationQuestion(StrictModel):
     options: list[str] = Field(default_factory=list, max_length=8)
 
 
+class AnalysisClarificationContext(StrictModel):
+    clarification_id: Identifier
+    target_item_key: Identifier
+    question: str = Field(min_length=1, max_length=500)
+    response_message_ids: dict[PartyRole, Identifier] = Field(
+        min_length=1, max_length=2
+    )
+
+
 class AgreementAnalysisRequest(StrictModel):
     session_id: Identifier
     mode: SessionMode
     participants: list[AnalysisParticipant] = Field(min_length=2, max_length=2)
     messages: list[AnalysisMessage] = Field(min_length=2, max_length=40)
+    clarification_contexts: list[AnalysisClarificationContext] = Field(
+        default_factory=list, max_length=10
+    )
 
     @model_validator(mode="after")
     def validate_conversation(self) -> AgreementAnalysisRequest:
@@ -236,6 +246,23 @@ class AgreementAnalysisRequest(StrictModel):
             speakers.add(message.speaker_id)
         if speakers != set(participant_ids):
             raise ValueError("each participant must provide at least one statement")
+
+        seen_clarification_ids: set[str] = set()
+        for context in self.clarification_contexts:
+            if context.clarification_id in seen_clarification_ids:
+                raise ValueError("clarification context IDs must be unique")
+            seen_clarification_ids.add(context.clarification_id)
+            for role, message_id in context.response_message_ids.items():
+                message = messages_by_id.get(message_id)
+                if message is None:
+                    raise ValueError(
+                        "clarification context must reference a supplied message"
+                    )
+                participant = participant_by_id[message.speaker_id]
+                if participant.role != role:
+                    raise ValueError(
+                        "clarification context response must match its participant"
+                    )
         return self
 
 

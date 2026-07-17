@@ -19,7 +19,7 @@ export function LiveSetup() {
   });
   const supported = languages.hirer === "en" && languages.worker === "en";
 
-  const startLivePreview = (event: FormEvent<HTMLFormElement>) => {
+  const continueToConversation = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supported) return;
     const query = new URLSearchParams({
@@ -39,12 +39,9 @@ export function LiveSetup() {
       </nav>
       <section className="setup-page">
         <header className="flow-heading">
-          <span>Live analysis preview</span>
-          <h1>Set up an English text conversation</h1>
-          <p>
-            Each person enters their own statements. MeaningSync analyzes the
-            text after both participants have contributed.
-          </p>
+          <span>Live conversation</span>
+          <h1>Choose each person’s language</h1>
+          <p>Each person can use the language they are most comfortable with.</p>
         </header>
 
         <div className="preview-notice" role="note">
@@ -52,7 +49,7 @@ export function LiveSetup() {
           <span>No microphone, audio recording, or live transcription is used.</span>
         </div>
 
-        <form onSubmit={startLivePreview}>
+        <form onSubmit={continueToConversation}>
           <div className="setup-grid">
             {participants.map((participant) => (
               <article className="setup-card" key={participant.role}>
@@ -87,8 +84,7 @@ export function LiveSetup() {
             <strong>English ↔ English</strong>
           </div>
           <p className="setup-availability">
-            English text analysis is available now. Hindi and mixed-language
-            analysis remain planned.
+            Hindi and mixed-language conversations are coming later.
           </p>
 
           <div className="setup-actions">
@@ -96,7 +92,7 @@ export function LiveSetup() {
               Back to home
             </Link>
             <button className="button primary" type="submit" disabled={!supported}>
-              Continue to conversation <span>→</span>
+              Continue <span>→</span>
             </button>
           </div>
         </form>

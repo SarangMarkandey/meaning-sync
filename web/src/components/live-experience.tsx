@@ -1,18 +1,17 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useId, useState } from "react";
 
-import { AgreementMap } from "@/components/agreement-map";
 import {
   api,
   MeaningSyncApiError,
-  type AgreementAnalysisRequest,
-  type AgreementAnalysisResponse,
   type AnalysisMessage,
   type LanguageCode,
+  type LiveSessionCreate,
   type PartyRole,
 } from "@/lib/api";
+import { LiveBrandBar, LiveProgress } from "@/components/live-flow-shell";
 
 const roleNames: Record<PartyRole, string> = {
   hirer: "Homeowner",
@@ -41,14 +40,13 @@ export function LiveExperience({
 }: {
   participantLanguages: Record<PartyRole, LanguageCode>;
 }) {
+  const router = useRouter();
   const reactId = useId();
-  const sessionId = `live-${reactId.replaceAll(":", "")}`;
   const speakerControlId = `speaker-${reactId.replaceAll(":", "")}`;
   const statementControlId = `statement-${reactId.replaceAll(":", "")}`;
   const [messages, setMessages] = useState<AnalysisMessage[]>([]);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [result, setResult] = useState<AgreementAnalysisResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<MeaningSyncApiError | null>(null);
 
@@ -60,7 +58,6 @@ export function LiveExperience({
     messages.every((message) => message.original_text.trim().length >= 2);
 
   const resetAnalysis = () => {
-    setResult(null);
     setError(null);
   };
 
@@ -146,18 +143,17 @@ export function LiveExperience({
     setLoading(true);
     setError(null);
     try {
-      const submission: AgreementAnalysisRequest = {
-        session_id: sessionId,
-        mode: "live",
+      const submission: LiveSessionCreate = {
         participants: [
           { id: "hirer", role: "hirer", language: participantLanguages.hirer },
           { id: "worker", role: "worker", language: participantLanguages.worker },
         ],
         messages,
       };
-      setResult(await api.analyzeAgreement(submission));
+      const session = await api.createLiveSession(submission);
+      await api.analyzeLiveSession(session.id);
+      router.push(`/live/${encodeURIComponent(session.id)}`);
     } catch (caught) {
-      setResult(null);
       setError(
         caught instanceof MeaningSyncApiError
           ? caught
@@ -168,24 +164,46 @@ export function LiveExperience({
     }
   };
 
+  if (loading) {
+    return (
+      <main className="app-shell">
+        <LiveBrandBar />
+        <section className="guided-flow-page">
+          <LiveProgress
+            currentStage="conversation"
+            explanation="MeaningSync is checking the statements you chose to submit."
+          />
+          <section className="analyzing-screen" aria-labelledby="analyzing-title" aria-live="polite">
+            <div className="analyzing-orbit" aria-hidden="true"><span /><span /><span /></div>
+            <p className="eyebrow">Checking understanding</p>
+            <h1 id="analyzing-title">Comparing both people’s statements…</h1>
+            <ul>
+              <li>Checking price, scope, materials, timing, and responsibilities…</li>
+              <li>Linking findings to the original statements…</li>
+              <li>This may take a moment. Please keep this page open.</li>
+            </ul>
+          </section>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell">
-      <nav className="topbar">
-        <Link className="brand" href="/">
-          <span className="brand-mark">M</span>
-          <span>MeaningSync</span>
-        </Link>
-        <span className="demo-pill">Live text preview</span>
-      </nav>
+      <LiveBrandBar />
 
       <section className="live-page">
+        <LiveProgress
+          currentStage="conversation"
+          explanation="Add at least one meaningful statement from each person, then check understanding."
+        />
         <header className="live-heading">
           <div>
-            <p className="eyebrow">English agreement analysis</p>
-            <h1>Build the conversation evidence</h1>
+            <p className="eyebrow">Conversation</p>
+            <h1>Add what each person said</h1>
             <p>
-              Add each person’s statements in order. MeaningSync analyzes only
-              the text you submit and links every finding back to it.
+              Enter the conversation in order. MeaningSync will check what
+              matches, what differs, and what was not discussed.
             </p>
           </div>
           <div className="text-only-badge">
@@ -257,7 +275,7 @@ export function LiveExperience({
                   </button>
                 )}
                 <button
-                  className="button primary"
+                  className="button secondary local-action"
                   type="submit"
                   disabled={draft.text.trim().length < 2 || loading}
                 >
@@ -290,7 +308,7 @@ export function LiveExperience({
                           <div>
                             <strong>{roleNames[party]}</strong>
                             <span>
-                              {message.message_id} · Original English
+                              Statement {message.order} · English
                             </span>
                           </div>
                           <div className="message-actions">
@@ -306,7 +324,7 @@ export function LiveExperience({
                               onClick={() => removeStatement(message.message_id)}
                               aria-label={`Remove statement ${message.order}`}
                             >
-                              Remove
+                              Delete
                             </button>
                           </div>
                         </header>
@@ -331,16 +349,18 @@ export function LiveExperience({
                 <span className={contributors.has("worker") ? "ready" : ""}>
                   Electrician {contributors.has("worker") ? "ready ✓" : "needed"}
                 </span>
+                {!canAnalyze && (
+                  <p>Add one meaningful statement from each person to continue.</p>
+                )}
               </div>
               <button
                 className="button primary"
                 type="button"
                 disabled={!canAnalyze || loading}
                 onClick={() => void analyzeAgreement()}
-                aria-label={loading ? "Analyzing agreement" : "Analyze Agreement"}
+                aria-label="Check understanding"
               >
-                {loading ? "Analyzing agreement…" : "Analyze Agreement"}
-                {!loading && <span>→</span>}
+                Check understanding <span>→</span>
               </button>
             </div>
           </section>
@@ -363,44 +383,6 @@ export function LiveExperience({
                 Try again
               </button>
             )}
-          </section>
-        )}
-
-        {result && (
-          <section className="analysis-results" aria-labelledby="results-title">
-            <header>
-              <span>
-                {result.status === "partial"
-                  ? "Partial analysis"
-                  : "Validated analysis"}
-              </span>
-              <h2 id="results-title">Agreement map</h2>
-              <p>
-                Confirmed meaning requires evidence from both participants.
-                One-sided statements remain open for clarification.
-              </p>
-            </header>
-            {result.warnings.map((warning) => (
-              <article
-                className="analysis-warning"
-                role="status"
-                key={warning.code}
-              >
-                <strong>Clarification unavailable</strong>
-                <p>{warning.message}</p>
-              </article>
-            ))}
-            {result.primary_clarification && (
-              <article className="primary-clarification">
-                <span>Most useful clarification</span>
-                <h3>{result.primary_clarification.prompt}</h3>
-                <p>
-                  Ask both participants this neutral question before relying on
-                  the shared understanding.
-                </p>
-              </article>
-            )}
-            <AgreementMap terms={result.terms} />
           </section>
         )}
 
