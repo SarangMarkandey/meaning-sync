@@ -228,3 +228,24 @@ Final verification results:
 - `npm test -- --run`: 46 passed across 9 files.
 - `npm run build`: passed with Next.js 16.2.10 and all 8 application routes generated.
 - No browser automation or paid OpenAI request ran during this completion pass.
+
+## P1A — Durable Live Sessions
+
+**Date:** 2026-07-17
+
+- Replaced the Live service's process-global session dictionary with one repository abstraction and explicit in-memory test and SQL production/local implementations.
+- Persisted the complete Live workflow as Pydantic-validated `state-v1` JSON, including messages, immutable versions, internal question semantics, private selections, reviews, confirmations, evidence, receipts, optional-detail status, and request-ID digests.
+- Added optimistic repository revisions so each mutation commits atomically against the loaded row. Concurrent updates fail with a controlled conflict; failed final selections leave no partial state.
+- Split analysis into short transactions around the external await: persist `analyzing`, release the database, then commit only against the expected revision or restore a retryable stage on failure.
+- Added SQLAlchemy 2.x storage, PostgreSQL support, ignored local SQLite, Alembic migrations, a uv lockfile, bounded session TTL, controlled HTTP 410 expiry, invalid-state protection, and startup/shutdown resource management.
+- Preserved the public Live JSON contract, hidden first selections, persistent idempotency, immutable parent-linked versions, confirmation invalidation, receipt contents/hash, deterministic Demo Mode, GPT-5.6 default, and `store=False`.
+- Kept the P1A interface same-device. Persistence is not authentication or participant privacy; role-bound tokens, invite exchange, QR joining, participant authorization, and synchronization remain P1B.
+
+Final verification results:
+
+- `ruff format --check .`: passed across 49 Python files; `ruff check .`: passed after correcting two local style findings.
+- `pytest`: 97 passed and 12 opt-in paid OpenAI evaluations skipped; the 109-test collection includes 10 new persistence tests.
+- FastAPI OpenAPI generation passed with 24 paths.
+- A fresh SQLite database upgraded to Alembic revision `20260717_01`; a separate two-repository/two-service restart smoke test recovered the created session.
+- `npm run lint`, `npm run type-check`, `npm test -- --run`, and `npm run build`: passed; 46 frontend tests passed across 9 files and Next.js 16.2.10 generated all 8 routes.
+- No browser automation, Docker requirement, paid test, or OpenAI request ran.

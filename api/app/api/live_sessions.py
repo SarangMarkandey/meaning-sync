@@ -1,8 +1,7 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.config import get_settings
 from app.schemas.analysis import AnalysisErrorResponse
 from app.schemas.understanding import (
     LeaveQuestionUnresolvedSubmission,
@@ -24,20 +23,17 @@ from app.schemas.workflow import (
     WorkflowErrorDetail,
     WorkflowErrorResponse,
 )
-from app.services.analyzers import AnalysisFailure, OpenAIAgreementAnalyzer
+from app.services.analyzers import AnalysisFailure
 from app.services.live_sessions import LiveSessionService, WorkflowFailure
 
 router = APIRouter(prefix="/api/v1/live/sessions", tags=["live sessions"])
 
-_settings = get_settings()
-_service = LiveSessionService(
-    analyzer=OpenAIAgreementAnalyzer(settings=_settings),
-    clarification_attempt_limit=_settings.meaningsync_clarification_attempt_limit,
-)
 
-
-def get_live_session_service() -> LiveSessionService:
-    return _service
+def get_live_session_service(request: Request) -> LiveSessionService:
+    service = getattr(request.app.state, "live_session_service", None)
+    if service is None:
+        raise RuntimeError("Live session repository is not initialized")
+    return service
 
 
 Service = Annotated[LiveSessionService, Depends(get_live_session_service)]
@@ -45,12 +41,14 @@ Service = Annotated[LiveSessionService, Depends(get_live_session_service)]
 
 ERROR_RESPONSES = {
     404: {"model": WorkflowErrorResponse},
+    410: {"model": WorkflowErrorResponse},
     409: {"model": WorkflowErrorResponse},
     422: {"model": WorkflowErrorResponse},
     429: {"model": AnalysisErrorResponse},
     502: {"model": AnalysisErrorResponse},
     503: {"model": AnalysisErrorResponse},
     504: {"model": AnalysisErrorResponse},
+    500: {"model": WorkflowErrorResponse},
 }
 
 

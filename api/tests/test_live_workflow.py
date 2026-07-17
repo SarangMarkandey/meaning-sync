@@ -13,6 +13,7 @@ from app.api.live_sessions import (
 from app.api.live_sessions import (
     start_understanding_check as api_start_understanding_check,
 )
+from app.repositories import InMemoryLiveSessionRepository
 from app.schemas.analysis import (
     AgreementAnalysisModelOutput,
     AgreementAnalysisRequest,
@@ -291,6 +292,7 @@ def service(
             high_impact_count=high_impact_count,
             include_missing=include_missing,
         ),
+        repository=InMemoryLiveSessionRepository(),
         clarification_attempt_limit=attempt_limit,
     )
 
@@ -748,7 +750,10 @@ async def test_completed_clarification_is_not_repeated_in_understanding_check() 
 
 @pytest.mark.anyio
 async def test_completed_clarification_can_skip_directly_to_confirmation() -> None:
-    workflow = LiveSessionService(analyzer=MaterialsOnlyFixtureAnalyzer())
+    workflow = LiveSessionService(
+        analyzer=MaterialsOnlyFixtureAnalyzer(),
+        repository=InMemoryLiveSessionRepository(),
+    )
     session = resolve_initial_materials(workflow, await analyzed(workflow))
 
     session = start_check(workflow, session)

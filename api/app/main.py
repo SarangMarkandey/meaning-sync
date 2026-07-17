@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -7,7 +9,8 @@ from fastapi.responses import JSONResponse, Response
 from app.api.analysis import router as analysis_router
 from app.api.live_sessions import router as live_sessions_router
 from app.api.sessions import router as sessions_router
-from app.config import cors_origins
+from app.config import cors_origins, get_settings
+from app.repositories import SqlLiveSessionRepository
 from app.schemas.analysis import (
     AnalysisErrorCode,
     AnalysisErrorDetail,
@@ -18,6 +21,29 @@ from app.schemas.workflow import (
     WorkflowErrorDetail,
     WorkflowErrorResponse,
 )
+from app.services.analyzers import OpenAIAgreementAnalyzer
+from app.services.live_sessions import LiveSessionService
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    settings = get_settings()
+    repository = SqlLiveSessionRepository(
+        settings.meaningsync_database_url,
+        ttl_hours=settings.meaningsync_session_ttl_hours,
+    )
+    repository.validate()
+    application.state.live_session_service = LiveSessionService(
+        analyzer=OpenAIAgreementAnalyzer(settings=settings),
+        repository=repository,
+        clarification_attempt_limit=settings.meaningsync_clarification_attempt_limit,
+    )
+    application.state.live_session_repository = repository
+    try:
+        yield
+    finally:
+        repository.close()
+
 
 app = FastAPI(
     title="MeaningSync API",
@@ -25,6 +51,7 @@ app = FastAPI(
         "Deterministic demo and choice-based live agreement understanding checks."
     ),
     version="0.4.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

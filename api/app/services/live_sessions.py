@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from threading import RLock
 from uuid import uuid4
 
 from app.domain.agreement_guidance import (
@@ -22,6 +22,14 @@ from app.domain.understanding_choices import (
     select_understanding_terms,
     semantic_meaning_fingerprint,
 )
+from app.repositories import (
+    LiveSessionRepository,
+    LiveSessionTransaction,
+    RepositoryConflict,
+    RepositorySessionExpired,
+    RepositorySessionNotFound,
+    RepositoryStateInvalid,
+)
 from app.schemas.analysis import (
     AgreementAnalysisRequest,
     AgreementAnalysisResponse,
@@ -35,6 +43,10 @@ from app.schemas.analysis import (
     ParticipantTermStatus,
     PartyRole,
     SessionMode,
+)
+from app.schemas.persistence import (
+    PersistedLiveSessionState,
+    PersistedQuestionRecord,
 )
 from app.schemas.understanding import (
     IndependentMeaningEvidence,
@@ -115,54 +127,25 @@ class WorkflowFailure(Exception):
         self.current_agreement_version_id = current_agreement_version_id
 
 
-@dataclass
-class _QuestionRecord:
-    question: UnderstandingQuestion
-    semantic_target: str
-    semantic_fingerprint: str
-    option_semantics: dict[str, str]
-    selections: dict[PartyRole, ParticipantSelection] = field(default_factory=dict)
-    unresolved_acknowledgments: set[PartyRole] = field(default_factory=set)
-    response_message_ids: dict[PartyRole, str] = field(default_factory=dict)
-    attempt_number: int = 1
-
-
-@dataclass
-class _LiveSessionRecord:
-    id: str
-    created_at: datetime
-    participants: list
-    messages: list[AnalysisMessage]
-    stage: LiveSessionStage = LiveSessionStage.CONVERSATION_DRAFT
-    versions: list[AgreementVersion] = field(default_factory=list)
-    current_version_id: str | None = None
-    questions: list[_QuestionRecord] = field(default_factory=list)
-    understanding_reviews: dict[PartyRole, ParticipantUnderstandingReview] = field(
-        default_factory=dict
-    )
-    active_participant_id: PartyRole | None = None
-    confirmations: list[ConfirmationRecord] = field(default_factory=list)
-    evidence_ledger: list[IndependentMeaningEvidence] = field(default_factory=list)
-    receipt: LiveClarityReceipt | None = None
-    processed_requests: dict[str, str] = field(default_factory=dict)
-    optional_details_reviewed: bool = False
+_QuestionRecord = PersistedQuestionRecord
+_LiveSessionRecord = PersistedLiveSessionState
 
 
 class LiveSessionService:
-    """Server-owned, in-memory lifecycle for Live agreement sessions."""
+    """Server-owned Live lifecycle persisted through a repository."""
 
     def __init__(
         self,
         *,
         analyzer: AgreementAnalyzer,
+        repository: LiveSessionRepository,
         clarification_attempt_limit: int = 3,
     ) -> None:
         if clarification_attempt_limit < 1:
             raise ValueError("clarification attempt limit must be positive")
         self._analyzer = analyzer
+        self._repository = repository
         self._clarification_attempt_limit = clarification_attempt_limit
-        self._sessions: dict[str, _LiveSessionRecord] = {}
-        self._lock = RLock()
 
     def create(self, submission: LiveSessionCreate) -> LiveSessionView:
         session_id = _id("live")
@@ -188,38 +171,42 @@ class LiveSessionService:
             participants=[_deep_copy(item) for item in request.participants],
             messages=[_deep_copy(item) for item in request.messages],
         )
-        with self._lock:
-            self._sessions[record.id] = record
-            return self._view(record)
+        try:
+            self._repository.create(record)
+        except RepositoryConflict as exc:
+            raise WorkflowFailure(
+                WorkflowErrorCode.CONCURRENT_UPDATE,
+                "The Live session could not be created because its ID already exists.",
+                status_code=409,
+                retryable=True,
+            ) from exc
+        return self._view(record)
 
     def get(self, session_id: str) -> LiveSessionView:
-        with self._lock:
-            return self._view(self._record(session_id))
+        return self._view(self._record(session_id))
 
     def list_versions(self, session_id: str) -> list[AgreementVersion]:
-        with self._lock:
-            return [_deep_copy(item) for item in self._record(session_id).versions]
+        return [_deep_copy(item) for item in self._record(session_id).versions]
 
     def get_version(self, session_id: str, version_id: str) -> AgreementVersion:
-        with self._lock:
-            record = self._record(session_id)
-            version = next(
-                (item for item in record.versions if item.id == version_id), None
+        record = self._record(session_id)
+        version = next(
+            (item for item in record.versions if item.id == version_id), None
+        )
+        if version is None:
+            raise WorkflowFailure(
+                WorkflowErrorCode.STALE_AGREEMENT_VERSION,
+                "That agreement version does not belong to this session.",
+                status_code=404,
+                current_agreement_version_id=record.current_version_id,
             )
-            if version is None:
-                raise WorkflowFailure(
-                    WorkflowErrorCode.STALE_AGREEMENT_VERSION,
-                    "That agreement version does not belong to this session.",
-                    status_code=404,
-                    current_agreement_version_id=record.current_version_id,
-                )
-            return _deep_copy(version)
+        return _deep_copy(version)
 
     async def analyze(
         self, session_id: str, submission: AnalyzeLiveSessionSubmission
     ) -> LiveSessionView:
-        with self._lock:
-            record = self._record(session_id)
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
             if record.stage != LiveSessionStage.CONVERSATION_DRAFT:
                 self._require_current_version(
                     record, submission.expected_agreement_version_id
@@ -231,18 +218,25 @@ class LiveSessionService:
                 raise self._stale(record)
             record.stage = LiveSessionStage.ANALYZING
             request = self._analysis_request(record, record.messages)
+        analyzing_revision = transaction.committed_revision
+        if analyzing_revision is None:
+            raise RuntimeError("analyzing state was not persisted")
 
         try:
             response = await self._analyzer.analyze(request)
         except Exception:
-            with self._lock:
-                current = self._record(session_id)
+            with self._transaction(
+                session_id, expected_revision=analyzing_revision
+            ) as failed:
+                current = failed.state
                 if current.stage == LiveSessionStage.ANALYZING:
                     current.stage = LiveSessionStage.CONVERSATION_DRAFT
             raise
 
-        with self._lock:
-            record = self._record(session_id)
+        with self._transaction(
+            session_id, expected_revision=analyzing_revision
+        ) as completed:
+            record = completed.state
             if record.stage != LiveSessionStage.ANALYZING or record.versions:
                 raise self._invalid_state(
                     record, "The analysis result is no longer current."
@@ -259,8 +253,8 @@ class LiveSessionService:
         question_id: str,
         submission: UnderstandingSelectionSubmission,
     ) -> LiveSessionView:
-        with self._lock:
-            record = self._record(session_id)
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
             digest = self._request_digest("selection", question_id, submission)
             if self._is_replay(record, submission.request_id, digest):
                 return self._view(record)
@@ -339,7 +333,6 @@ class LiveSessionService:
                 submitted_at=_now(),
                 request_id=submission.request_id,
             )
-            snapshot = _deep_copy(record)
             question.selections[submission.participant_id] = selection
             answered = list(question.selections)
             if len(answered) < len(question.question.addressed_participant_ids):
@@ -361,9 +354,8 @@ class LiveSessionService:
                 self._complete_question(record, version, question)
             except Exception:
                 # Completion can derive an immutable version and append synthetic
-                # evidence. Restore the entire session if any part fails so the
-                # second private choice and its request ID are never half-stored.
-                self._sessions[session_id] = snapshot
+                # evidence. The repository transaction rolls the whole mutation
+                # back so the second private choice is never half-stored.
                 raise
             self._mark_processed(record, submission.request_id, digest)
             return self._view(record)
@@ -374,8 +366,8 @@ class LiveSessionService:
         question_id: str,
         submission: LeaveQuestionUnresolvedSubmission,
     ) -> LiveSessionView:
-        with self._lock:
-            record = self._record(session_id)
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
             digest = self._request_digest("leave-unresolved", question_id, submission)
             if self._is_replay(record, submission.request_id, digest):
                 return self._view(record)
@@ -398,7 +390,6 @@ class LiveSessionService:
                 )
             self._require_stage(record, LiveSessionStage.NEEDS_CLARIFICATION)
             self._require_actor(record, submission.participant_id)
-            snapshot = _deep_copy(record)
             question.unresolved_acknowledgments.add(submission.participant_id)
             if len(question.unresolved_acknowledgments) < len(PartyRole):
                 record.active_participant_id = next(
@@ -439,8 +430,7 @@ class LiveSessionService:
                 self._select_next_stage(record)
             except Exception:
                 # The final unresolved acknowledgment can derive a new version.
-                # Roll back the acknowledgment and request ID together on failure.
-                self._sessions[session_id] = snapshot
+                # The repository rolls the acknowledgment and request ID back.
                 raise
             self._mark_processed(record, submission.request_id, digest)
             return self._view(record)
@@ -448,8 +438,8 @@ class LiveSessionService:
     async def add_statements(
         self, session_id: str, submission: AdditionalStatementsSubmission
     ) -> LiveSessionView:
-        with self._lock:
-            record = self._record(session_id)
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
             digest = self._request_digest("add-statements", None, submission)
             if self._is_replay(record, submission.request_id, digest):
                 return self._view(record)
@@ -469,18 +459,25 @@ class LiveSessionService:
             request = self._analysis_request(record, candidate_messages)
             previous_stage = record.stage
             record.stage = LiveSessionStage.ANALYZING
+        analyzing_revision = transaction.committed_revision
+        if analyzing_revision is None:
+            raise RuntimeError("analyzing state was not persisted")
 
         try:
             response = await self._analyzer.analyze(request)
         except Exception:
-            with self._lock:
-                current = self._record(session_id)
+            with self._transaction(
+                session_id, expected_revision=analyzing_revision
+            ) as failed:
+                current = failed.state
                 if current.stage == LiveSessionStage.ANALYZING:
                     current.stage = previous_stage
             raise
 
-        with self._lock:
-            record = self._record(session_id)
+        with self._transaction(
+            session_id, expected_revision=analyzing_revision
+        ) as completed:
+            record = completed.state
             if record.current_version_id != version.id:
                 raise self._stale(record)
             record.messages.extend(messages)
@@ -495,8 +492,8 @@ class LiveSessionService:
     def propose_not_applicable(
         self, session_id: str, submission: NotApplicableProposalSubmission
     ) -> LiveSessionView:
-        with self._lock:
-            record = self._record(session_id)
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
             digest = self._request_digest("not-applicable", None, submission)
             if self._is_replay(record, submission.request_id, digest):
                 return self._view(record)
@@ -608,8 +605,8 @@ class LiveSessionService:
         session_id: str,
         submission: OptionalDetailsReviewedSubmission,
     ) -> LiveSessionView:
-        with self._lock:
-            record = self._record(session_id)
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
             digest = self._request_digest("optional-reviewed", None, submission)
             if self._is_replay(record, submission.request_id, digest):
                 return self._view(record)
@@ -637,8 +634,8 @@ class LiveSessionService:
         session_id: str,
         submission: StartUnderstandingCheckSubmission,
     ) -> LiveSessionView:
-        with self._lock:
-            record = self._record(session_id)
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
             digest = self._request_digest("start-understanding", None, submission)
             if self._is_replay(record, submission.request_id, digest):
                 return self._view(record)
@@ -743,8 +740,8 @@ class LiveSessionService:
     def submit_confirmation(
         self, session_id: str, submission: ConfirmationSubmission
     ) -> LiveSessionView:
-        with self._lock:
-            record = self._record(session_id)
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
             digest = self._request_digest("confirmation", None, submission)
             if self._is_replay(record, submission.request_id, digest):
                 return self._view(record)
@@ -838,8 +835,8 @@ class LiveSessionService:
     def issue_receipt(
         self, session_id: str, submission: IssueReceiptSubmission
     ) -> LiveClarityReceipt:
-        with self._lock:
-            record = self._record(session_id)
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
             digest = self._request_digest("issue-receipt", None, submission)
             if self._is_replay(record, submission.request_id, digest):
                 if record.receipt is None:
@@ -901,39 +898,37 @@ class LiveSessionService:
             return _deep_copy(receipt)
 
     def get_receipt(self, session_id: str) -> LiveClarityReceipt:
-        with self._lock:
-            record = self._record(session_id)
-            if record.receipt is None:
-                raise WorkflowFailure(
-                    WorkflowErrorCode.RECEIPT_NOT_READY,
-                    "A clarity receipt has not been issued for this session.",
-                    status_code=409,
-                    current_agreement_version_id=record.current_version_id,
-                )
-            return _deep_copy(record.receipt)
+        record = self._record(session_id)
+        if record.receipt is None:
+            raise WorkflowFailure(
+                WorkflowErrorCode.RECEIPT_NOT_READY,
+                "A clarity receipt has not been issued for this session.",
+                status_code=409,
+                current_agreement_version_id=record.current_version_id,
+            )
+        return _deep_copy(record.receipt)
 
     def confirmation_status(self, session_id: str) -> ConfirmationStatusView:
-        with self._lock:
-            record = self._record(session_id)
-            confirmations = (
-                self._current_confirmations(record, record.current_version_id)
-                if record.current_version_id
-                else []
-            )
-            return ConfirmationStatusView(
-                session_id=record.id,
-                stage=record.stage,
-                current_agreement_version_id=record.current_version_id,
-                confirmations=[_deep_copy(item) for item in confirmations],
-                receipt_ready=(
-                    len(confirmations) == 2
-                    and record.stage
-                    in {
-                        LiveSessionStage.CONFIRMED,
-                        LiveSessionStage.RECEIPT_ISSUED,
-                    }
-                ),
-            )
+        record = self._record(session_id)
+        confirmations = (
+            self._current_confirmations(record, record.current_version_id)
+            if record.current_version_id
+            else []
+        )
+        return ConfirmationStatusView(
+            session_id=record.id,
+            stage=record.stage,
+            current_agreement_version_id=record.current_version_id,
+            confirmations=[_deep_copy(item) for item in confirmations],
+            receipt_ready=(
+                len(confirmations) == 2
+                and record.stage
+                in {
+                    LiveSessionStage.CONFIRMED,
+                    LiveSessionStage.RECEIPT_ISSUED,
+                }
+            ),
+        )
 
     def _complete_question(
         self,
@@ -1288,15 +1283,61 @@ class LiveSessionService:
         return derived
 
     def _record(self, session_id: str) -> _LiveSessionRecord:
-        record = self._sessions.get(session_id)
-        if record is None:
+        try:
+            return self._repository.load(session_id).state
+        except RepositorySessionNotFound as exc:
             raise WorkflowFailure(
                 WorkflowErrorCode.SESSION_NOT_FOUND,
-                "Live session not found. It may have expired because storage "
-                "is in memory.",
+                "Live session not found.",
                 status_code=404,
-            )
-        return record
+            ) from exc
+        except RepositorySessionExpired as exc:
+            raise WorkflowFailure(
+                WorkflowErrorCode.SESSION_EXPIRED,
+                "This Live session has expired and is no longer available.",
+                status_code=410,
+            ) from exc
+        except RepositoryStateInvalid as exc:
+            raise WorkflowFailure(
+                WorkflowErrorCode.STORED_STATE_INVALID,
+                "The stored Live session could not be loaded safely.",
+                status_code=500,
+            ) from exc
+
+    @contextmanager
+    def _transaction(
+        self, session_id: str, *, expected_revision: int | None = None
+    ) -> Iterator[LiveSessionTransaction]:
+        try:
+            with self._repository.transaction(
+                session_id, expected_revision=expected_revision
+            ) as transaction:
+                yield transaction
+        except RepositorySessionNotFound as exc:
+            raise WorkflowFailure(
+                WorkflowErrorCode.SESSION_NOT_FOUND,
+                "Live session not found.",
+                status_code=404,
+            ) from exc
+        except RepositorySessionExpired as exc:
+            raise WorkflowFailure(
+                WorkflowErrorCode.SESSION_EXPIRED,
+                "This Live session has expired and is no longer available.",
+                status_code=410,
+            ) from exc
+        except RepositoryConflict as exc:
+            raise WorkflowFailure(
+                WorkflowErrorCode.CONCURRENT_UPDATE,
+                "The Live session changed in another request. Refresh and retry.",
+                status_code=409,
+                retryable=True,
+            ) from exc
+        except RepositoryStateInvalid as exc:
+            raise WorkflowFailure(
+                WorkflowErrorCode.STORED_STATE_INVALID,
+                "The stored Live session could not be loaded safely.",
+                status_code=500,
+            ) from exc
 
     def _view(self, record: _LiveSessionRecord) -> LiveSessionView:
         current_confirmations = (

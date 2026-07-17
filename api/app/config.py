@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     openai_store_responses: bool = False
     openai_request_timeout_seconds: float = Field(default=30, gt=0, le=120)
     meaningsync_clarification_attempt_limit: int = Field(default=3, ge=1, le=10)
+    meaningsync_database_url: str = "sqlite:///./meaningsync-local.db"
+    meaningsync_session_ttl_hours: int = Field(default=24, ge=1, le=720)
 
     @field_validator("openai_store_responses")
     @classmethod
