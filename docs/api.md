@@ -7,7 +7,7 @@ All operations are JSON under `/api/v1/live/sessions`. FastAPI owns lifecycle st
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/api/v1/live/sessions` | Create an English Live session from exactly one `hirer`, one `worker`, and 2–40 ordered messages. |
-| `GET` | `/api/v1/live/sessions/{session_id}` | Reload the authoritative session view. Returns `session_not_found` after in-memory loss. |
+| `GET` | `/api/v1/live/sessions/{session_id}` | Reload the authoritative durable session view after refresh or backend restart. |
 | `POST` | `/api/v1/live/sessions/{session_id}/analysis` | Analyze the draft and create Agreement Map v1. Body: `expected_agreement_version_id` (initially `null`). |
 | `GET` | `/api/v1/live/sessions/{session_id}/agreement-versions` | List immutable snapshots in version order. |
 | `GET` | `/api/v1/live/sessions/{session_id}/agreement-versions/{version_id}` | Retrieve one immutable snapshot for comparison. |
@@ -59,7 +59,7 @@ A `confirm` decision requires that participant’s current-version understanding
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/{session_id}/receipt` | Issue once applicable understanding checks and both current confirmations are complete. Body: expected version and `request_id`. |
-| `GET` | `/{session_id}/receipt` | Retrieve the immutable in-memory snapshot; returns `receipt_not_ready` before issuance. |
+| `GET` | `/{session_id}/receipt` | Retrieve the immutable durable snapshot; returns `receipt_not_ready` before issuance. |
 
 The `clarity-receipt-v2` snapshot separates aligned, conflicting/unresolved, one-sided, not-applicable, and not-discussed entries; retains evidence and clarification history; records `understanding_status` and both confirmation timestamps; and reports `fully_aligned` or `contains_unresolved_items`.
 
@@ -78,8 +78,10 @@ Workflow failures use:
 }
 ```
 
-HTTP 404 covers missing sessions, versions, or questions; 409 covers invalid state, stale versions, the wrong active participant, idempotency conflict, incomplete understanding, confirmation/version mismatch, and receipt readiness; 422 covers invalid item, option, or acknowledgment data. Named workflow codes include `invalid_state`, `session_not_found`, `stale_agreement_version`, `question_not_found`, `invalid_option`, `question_incomplete`, `idempotency_conflict`, `clarification_target_missing`, `clarification_limit_reached`, `participant_mismatch`, `understanding_incomplete`, `confirmation_missing`, `confirmation_version_mismatch`, and `receipt_not_ready`. Provider errors retain the existing safe 429/502/503/504 contract without raw provider details.
+HTTP 404 covers missing sessions, versions, or questions; HTTP 410 returns `session_expired`; 409 covers invalid state, stale versions, concurrent repository revisions, the wrong active participant, idempotency conflict, incomplete understanding, confirmation/version mismatch, and receipt readiness; 422 covers invalid item, option, or acknowledgment data. Named persistence codes include `concurrent_update` and `stored_state_invalid`; invalid or unknown stored JSON returns a controlled HTTP 500 instead of being accepted. Provider errors retain the existing safe 429/502/503/504 contract without raw provider details.
+
+Request-ID digests are part of the durable session document. A retry with the same ID and payload returns the current successful state even after restart; using that ID for a different payload remains a conflict. The internal repository revision is intentionally absent from the public JSON contract.
 
 ## Client Usability Contract
 
-The default client renders one primary action from `guidance`. Its first useful click must either invoke that action, reveal the exact evidence or issue needed to decide, or navigate safely back to the current summary. Loading disables repeat mutation, and a 404 session response leads to the explicit in-memory-session recovery screen. Technical item keys, internal snapshot numbers, and fingerprints are diagnostic/provenance details and are progressively disclosed rather than used as the main instructions.
+The default client renders one primary action from `guidance`. Its first useful click must either invoke that action, reveal the exact evidence or issue needed to decide, or navigate safely back to the current summary. Loading disables repeat mutation. A 404 means the session is absent; a 410 means its configured retention period ended. Technical item keys, repository revisions, internal snapshot numbers, and fingerprints are diagnostic/provenance details and are progressively disclosed rather than used as the main instructions.

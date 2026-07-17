@@ -22,3 +22,8 @@ coverage/
 !.env.example
 .DS_Store
 .vercel/
+
+# Local databases
+meaningsync-local.db*
+*.sqlite
+*.sqlite3

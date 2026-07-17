@@ -6,13 +6,15 @@ The browser sends speaker-attributed English statements to FastAPI through the t
 
 Demo Mode is deterministic, key-free, and sends nothing to OpenAI. Normal automated tests use deterministic or mocked analyzers plus deterministic choice services and consume no API credits. A paid integration run remains explicitly opt-in and must never be used as a routine test.
 
-## Process-Local Storage
+## Durable Live Storage
 
-Live sessions currently retain participants, messages, immutable agreement versions, questions, pending participant selections, independent-evidence status, confirmations, and clarity receipts only in FastAPI process memory. No database, durable backup, or cross-worker recovery exists. A page refresh can recover while the same backend process is alive; a restart or memory loss removes the session. The UI reports a missing session and directs users to start again rather than presenting cached browser state as authoritative.
+Live sessions retain participants, messages, immutable agreement versions, questions, pending participant selections, independent-evidence status, confirmations, request-ID digests, and clarity receipts in a validated versioned database document. PostgreSQL is recommended for production; ignored SQLite supports local development. Live state survives backend restarts until the configured 1–720 hour TTL expires. Demo Mode remains process-local.
 
-A pending participant’s option, semantic value, selection ID, and `Something else` text remain in private process state until every addressed participant answers. For a two-person question, the first selection is not included in the public session response, page payload, query string, local storage, or client state available during the handoff to the second person. After both answer, the UI may reveal their positions neutrally. These controls reduce accidental disclosure in the ordinary flow; they are not a durable secrecy guarantee.
+Persistence is not authorization. P1A has no participant token, account, role-specific read boundary, or deletion endpoint. Anyone who can reach a session through the current same-device application context is not cryptographically distinguished from either participant. Backups, encryption-key operations, automatic expired-row cleanup, audit logging, and user-controlled deletion are not implemented; production operators must apply database access, encryption, backup, and deletion policies outside the application for now.
 
-Progressive disclosure keeps full evidence, technical item keys, internal snapshot history, fingerprints, and optional details out of the default decision view. This reduces accidental shoulder-surfing and cognitive overload, but it is presentation—not access control. The data remains available to the same browser session and in FastAPI process memory.
+A pending participant’s option, semantic value, selection ID, and `Something else` text remain in backend-only persisted state until every addressed participant answers. For a two-person question, the first selection is not included in the public session response, page payload, query string, local storage, or client state available during the handoff to the second person. After both answer, the UI may reveal their positions neutrally. These controls reduce accidental disclosure in the ordinary flow; database persistence does not make them a participant-specific secrecy guarantee.
+
+Progressive disclosure keeps full evidence, technical item keys, internal snapshot history, fingerprints, and optional details out of the default decision view. This reduces accidental shoulder-surfing and cognitive overload, but it is presentation—not access control. The data remains available through the same browser flow and in backend storage.
 
 ## Same-Device Limitations
 
@@ -24,6 +26,6 @@ Separate confirmations bind server-owned participant role, current version, comp
 
 ## Receipt and Integrity
 
-A clarity receipt is an immutable in-memory snapshot. It preserves aligned and unresolved meaning, one-sided and not-discussed terms, not-applicable proposals, evidence, clarification history, understanding-check completion status, and separate confirmation timestamps. Its SHA-256 integrity hash is calculated over a canonical server-side payload and can reveal payload changes when recomputed. It does not prove comprehension, consent, identity, authorship, time from a trusted authority, non-repudiation, or legal validity; it is not a digital signature.
+A clarity receipt is an immutable durable snapshot. It preserves aligned and unresolved meaning, one-sided and not-discussed terms, not-applicable proposals, evidence, clarification history, understanding-check completion status, and separate confirmation timestamps. Its SHA-256 integrity hash is unchanged across storage reloads and can reveal payload changes when recomputed. It does not prove comprehension, consent, identity, authorship, time from a trusted authority, non-repudiation, or legal validity; it is not a digital signature.
 
-Keep secrets only in ignored local `.env` files and use explicit CORS origins. Durable encryption, retention/deletion controls, authenticated access, audit logging, and secure separate-device participation remain planned. MeaningSync does not provide legal advice, and a clarity receipt is not a legally enforceable contract.
+Keep secrets and database credentials only in ignored backend `.env` files; never expose them through `NEXT_PUBLIC_*`. Use explicit CORS origins. Role-bound access, invitation exchange, QR joining, participant authorization, and synchronization remain P1B. MeaningSync does not provide legal advice, and a clarity receipt is not a legally enforceable contract.

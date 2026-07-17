@@ -4,10 +4,13 @@ version = "0.1.0"
 description = "MeaningSync agreement analysis API"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.14,<2",
     "fastapi>=0.115,<1",
     "openai>=2.20,<3",
+    "psycopg[binary]>=3.2,<4",
     "pydantic>=2.10,<3",
     "pydantic-settings>=2.7,<3",
+    "sqlalchemy>=2.0,<3",
     "uvicorn[standard]>=0.34,<1",
 ]
 
@@ -25,6 +28,10 @@ addopts = "-q"
 
 [tool.fastapi]
 entrypoint = "app.main:app"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["alembic*", "tests*"]
 
 [tool.ruff]
 line-length = 88

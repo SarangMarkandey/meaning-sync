@@ -16,12 +16,12 @@
 - Deterministic choice construction with stable semantic options, at most one additional check after completed clarification, a three-check cap without clarification, semantic deduplication, and safe stage skipping
 - Same-device Homeowner/Electrician handoff with hidden first selection, `Something else` and uncertainty handling, versioned changes, and exact-item reopening
 - Separate participant/version/understanding-review-bound confirmations, stale-version protection, request-ID idempotency, and invalidation after changes
-- In-memory Live clarity receipt with aligned and unresolved categories, evidence, clarification history, separate timestamps, disclaimer, and payload-change hash
+- Durable SQL-backed Live sessions and clarity receipts with validated versioned JSON, restart recovery, persistent idempotency, optimistic revisions, TTL expiry, and Alembic migrations
 
 ## Partially Implemented
 
 - Independent `en`/`hi` language settings and translation interface; only English flows are enabled
-- Session recovery and receipts remain process-local; refresh works only while the same FastAPI process retains the session
+- TTL retention is enforced, but automatic expired-row cleanup, backup, deletion tooling, and privacy-preserving observability are not yet implemented
 - Same-device privacy cues without authentication, identity verification, or a secure participant boundary
 - First-click and responsive usability criteria are automated/manually checked, but moderated usability research has not yet been run
 
@@ -29,8 +29,8 @@
 
 1. Run moderated first-click and end-to-end usability studies without changing the server-owned safety rules.
 2. Evaluate agreement analysis with explicitly authorized opt-in model runs, and evaluate understanding-choice clarity with moderated human review.
-3. Add durable session/receipt persistence, restart recovery, retention/deletion controls, and privacy-preserving observability.
-4. Add authenticated separate-device QR joining and realtime session updates.
+3. Add P1B role-bound participant tokens, single-use invite exchange, QR joining, participant-specific authorization, and lightweight synchronization.
+4. Add automatic retention cleanup, backup/deletion operations, and privacy-preserving observability.
 5. Add Hindi UI, Hindi analysis, optional translation, and bilingual receipts while preserving original evidence.
 6. Add audio capture/playback with explicit recording consent and privacy controls.
 7. Expand safety review; identity/signature services and custom PDF output remain separate product decisions, not implied capabilities.

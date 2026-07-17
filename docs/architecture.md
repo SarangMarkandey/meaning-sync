@@ -6,6 +6,8 @@
 flowchart LR
   Browser[Next.js browser UI] -->|typed JSON| API[FastAPI]
   API --> Live[Live session service]
+  Live --> Repo[LiveSessionRepository]
+  Repo --> SQL[(PostgreSQL production / SQLite local)]
   API --> Demo[Deterministic demo service]
   Live --> Analyzer[OpenAI agreement analyzer]
   Analyzer --> Validate[Application validation and evidence hydration]
@@ -60,7 +62,7 @@ The UI separately displays a meaningful version number. It increments only when 
 
 Question fingerprints bind the exact semantic target and normalized positions across internal versions. They prevent equivalent open questions from being duplicated; they do not merge distinct atomic agreement items. A server-owned independent-evidence record also prevents a completed clarification item from being repeated during Check understanding. Attempt limits remain a separate protection against clarification loops.
 
-The first selection stays in private process memory and is omitted from the public response, page payload, URL, and browser storage until the second addressed participant answers. Clarifications remain bound to the exact item and source version. A resulting explicit statement or changed shared meaning enters the existing immutable version flow. The configurable per-item attempt limit ends loops by preserving the unresolved item for explicit review.
+The first selection stays in private persisted session state and is omitted from the public response, page payload, URL, and browser storage until the second addressed participant answers. Clarifications remain bound to the exact item and source version. A resulting explicit statement or changed shared meaning enters the existing immutable version flow. The configurable per-item attempt limit ends loops by preserving the unresolved item for explicit review.
 
 ## Check Understanding, Confirmation, and Receipt
 
@@ -74,4 +76,8 @@ Confirmations bind participant, current agreement version, completion of that pa
 
 ## Storage and Recovery
 
-Demo and Live sessions are process-local only. A browser refresh can reload a session while FastAPI remains alive. A backend restart, worker change, or memory loss makes the session unavailable; the UI must report that truthfully and offer a fresh start. Durable persistence, authentication, separate-device/QR joining, audio, multilingual flows, retention controls, and custom PDF output remain planned. MeaningSync does not prove identity or consent, provide legal advice, or create a legally enforceable contract.
+Live workflow state is an explicit Pydantic-validated `state-v1` JSON document behind one `LiveSessionRepository` abstraction. `SqlLiveSessionRepository` stores the document with a monotonic revision, creation/update timestamps, and expiry. Every mutation loads and validates within a transaction and updates only when the expected revision still matches. PostgreSQL is the production recommendation; ignored SQLite is supported for local work and repository tests. `InMemoryLiveSessionRepository` is an explicit deterministic test implementation, never a production fallback.
+
+Analysis uses two transactions: persist `analyzing`, release the database while awaiting OpenAI, then commit only against the expected analyzing revision. Controlled provider failure restores a retryable stage without deleting durable state. Alembic owns schema changes; startup validates connectivity and migration presence rather than calling `create_all()`.
+
+Live sessions and receipts survive backend restarts until `MEANINGSYNC_SESSION_TTL_HOURS` expires. Expired sessions return HTTP 410; automatic row cleanup, backups, and user-facing deletion are not implemented. Demo sessions remain process-local. Persistence does not add authentication or participant privacy: P1A keeps the same-device UI. Role-bound tokens, single-use invitation exchange, QR joining, participant authorization, and lightweight synchronization remain P1B. Audio, multilingual flows, and custom PDF output remain separate work. MeaningSync does not prove identity or consent, provide legal advice, or create a legally enforceable contract.
