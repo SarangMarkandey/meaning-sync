@@ -19,7 +19,10 @@ from app.schemas.analysis import (
     SessionMode,
     StrictModel,
 )
-from app.schemas.teachback import TeachbackComparisonState, TeachbackItemResult
+from app.schemas.understanding import (
+    UnderstandingQuestion,
+    UnderstandingReviewResult,
+)
 
 
 class FrozenWorkflowModel(StrictModel):
@@ -34,8 +37,8 @@ class LiveSessionStage(StrEnum):
     CONVERSATION_DRAFT = "conversation_draft"
     ANALYZING = "analyzing"
     NEEDS_CLARIFICATION = "needs_clarification"
-    READY_FOR_REVIEW = "ready_for_review"
-    AWAITING_TEACHBACKS = "awaiting_teachbacks"
+    READY_FOR_UNDERSTANDING_CHECK = "ready_for_understanding_check"
+    AWAITING_UNDERSTANDING_CHECKS = "awaiting_understanding_checks"
     AWAITING_CONFIRMATIONS = "awaiting_confirmations"
     CONFIRMED = "confirmed"
     RECEIPT_ISSUED = "receipt_issued"
@@ -52,17 +55,16 @@ class ClarificationWorkflowStatus(StrEnum):
 class LiveUserStage(StrEnum):
     CONVERSATION = "conversation"
     CLARIFY = "clarify"
-    REVIEW = "review"
+    CHECK_UNDERSTANDING = "check_understanding"
     CONFIRM = "confirm"
     RECEIPT = "receipt"
 
 
 class LiveGuidanceAction(StrEnum):
-    ANSWER_CLARIFICATION = "answer_clarification"
+    SUBMIT_SELECTION = "submit_selection"
     LEAVE_UNRESOLVED = "leave_unresolved"
     REVIEW_OPTIONAL_DETAILS = "review_optional_details"
-    REVIEW_FINAL_UNDERSTANDING = "review_final_understanding"
-    SUBMIT_TEACHBACK = "submit_teachback"
+    START_UNDERSTANDING_CHECK = "start_understanding_check"
     SUBMIT_CONFIRMATION = "submit_confirmation"
     ISSUE_RECEIPT = "issue_receipt"
     VIEW_RECEIPT = "view_receipt"
@@ -70,9 +72,9 @@ class LiveGuidanceAction(StrEnum):
 
 class ParticipantReviewStatus(StrEnum):
     NOT_STARTED = "not_started"
-    REVIEWING = "reviewing"
-    TEACHBACK_SUBMITTED = "teachback_submitted"
-    NEEDS_CLARIFICATION = "needs_clarification"
+    CHECKING = "checking"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
     READY_TO_CONFIRM = "ready_to_confirm"
     CONFIRMED = "confirmed"
 
@@ -95,8 +97,11 @@ class WorkflowErrorCode(StrEnum):
     CLARIFICATION_TARGET_MISSING = "clarification_target_missing"
     CLARIFICATION_LIMIT_REACHED = "clarification_limit_reached"
     PARTICIPANT_MISMATCH = "participant_mismatch"
-    TEACHBACK_INCOMPLETE = "teachback_incomplete"
-    TEACHBACK_MISMATCH = "teachback_mismatch"
+    QUESTION_NOT_FOUND = "question_not_found"
+    INVALID_OPTION = "invalid_option"
+    QUESTION_INCOMPLETE = "question_incomplete"
+    IDEMPOTENCY_CONFLICT = "idempotency_conflict"
+    UNDERSTANDING_INCOMPLETE = "understanding_incomplete"
     CONFIRMATION_MISSING = "confirmation_missing"
     CONFIRMATION_VERSION_MISMATCH = "confirmation_version_mismatch"
     RECEIPT_NOT_READY = "receipt_not_ready"
@@ -173,55 +178,21 @@ class AgreementVersion(FrozenWorkflowModel):
         return self
 
 
-class ClarificationWorkflowRecord(FrozenWorkflowModel):
+class ParticipantUnderstandingReview(FrozenWorkflowModel):
     id: Identifier
-    target_item_key: Identifier
-    target_agreement_version_id: Identifier
-    term_id: Identifier
-    question: str = Field(min_length=1, max_length=500)
-    answer_options: list[str] = Field(default_factory=list, max_length=8)
-    fingerprint: str = Field(default="legacy", min_length=1, max_length=80)
-    semantic_target: Identifier = "legacy.target"
-    addressed_participant_ids: list[PartyRole] = Field(min_length=1, max_length=2)
-    response_message_ids: dict[PartyRole, Identifier] = Field(default_factory=dict)
-    answers_received_from: list[PartyRole] = Field(default_factory=list, max_length=2)
-    responses_revealed: bool = False
-    status: ClarificationWorkflowStatus
-    attempt_number: int = Field(ge=1, le=20)
-    created_at: datetime
-    resolved_at: datetime | None = None
-    resulting_agreement_version_id: Identifier | None = None
-
-
-class ParticipantReview(FrozenWorkflowModel):
     participant_id: PartyRole
     agreement_version_id: Identifier
     status: ParticipantReviewStatus
-    teachback_id: Identifier | None = None
-
-
-class TeachbackRecord(FrozenWorkflowModel):
-    id: Identifier
-    participant_id: PartyRole
-    agreement_version_id: Identifier
-    original_text: str = Field(min_length=1, max_length=40000, exclude=True)
-    original_language: LanguageCode
-    covered_item_keys: list[Identifier] = Field(default_factory=list, max_length=20)
-    item_results: list[TeachbackItemResult] = Field(default_factory=list, max_length=20)
-    overall_state: TeachbackComparisonState
-    missing_or_contradictory_summary: str | None = Field(default=None, max_length=600)
-    follow_up_question: str | None = Field(default=None, max_length=500)
-    acknowledged_unresolved_item_keys: list[Identifier] = Field(
-        default_factory=list, max_length=20
-    )
+    completed_question_ids: list[Identifier] = Field(default_factory=list, max_length=3)
     created_at: datetime
+    completed_at: datetime | None = None
 
 
 class ConfirmationRecord(FrozenWorkflowModel):
     id: Identifier
     participant_id: PartyRole
     agreement_version_id: Identifier
-    teachback_id: Identifier
+    understanding_review_id: Identifier
     unresolved_item_acknowledgments: list[Identifier] = Field(
         default_factory=list, max_length=20
     )
@@ -249,11 +220,12 @@ class ReceiptParticipant(FrozenWorkflowModel):
     language: LanguageCode
 
 
-class ReceiptTeachbackStatus(FrozenWorkflowModel):
+class ReceiptUnderstandingStatus(FrozenWorkflowModel):
     participant_id: PartyRole
-    teachback_id: Identifier
-    result: TeachbackComparisonState
+    review_id: Identifier
+    result: UnderstandingReviewResult
     completed_at: datetime
+    question_ids: list[Identifier] = Field(default_factory=list, max_length=3)
 
 
 class ReceiptConfirmation(FrozenWorkflowModel):
@@ -276,11 +248,13 @@ class LiveClarityReceipt(FrozenWorkflowModel):
     not_applicable_terms: list[NotApplicableProposal]
     not_discussed_terms: list[AgreementTerm]
     clarification_history: list[ClarificationHistoryEntry]
-    teachback_status: list[ReceiptTeachbackStatus] = Field(min_length=2, max_length=2)
+    understanding_status: list[ReceiptUnderstandingStatus] = Field(
+        min_length=2, max_length=2
+    )
     confirmations: list[ReceiptConfirmation] = Field(min_length=2, max_length=2)
     status: ReceiptStatus
-    application_version: str = "0.3.0"
-    schema_version: str = "clarity-receipt-v1"
+    application_version: str = "0.4.0"
+    schema_version: str = "clarity-receipt-v2"
     disclaimer: str = (
         "This clarity receipt records the participants’ stated understanding. "
         "MeaningSync does not provide legal advice, and this receipt is not "
@@ -300,6 +274,7 @@ class LiveWorkflowGuidance(StrictModel):
     required_issue_count: int = Field(ge=0, le=20)
     optional_missing_count: int = Field(ge=0, le=20)
     acting_participant: PartyRole | None = None
+    active_question_id: Identifier | None = None
     active_clarification_id: Identifier | None = None
     target_item_key: Identifier | None = None
     required_item_keys: list[Identifier] = Field(default_factory=list, max_length=20)
@@ -314,10 +289,11 @@ class LiveSessionView(StrictModel):
     messages: list[AnalysisMessage] = Field(min_length=2, max_length=80)
     agreement_versions: list[AgreementVersion] = Field(default_factory=list)
     current_agreement_version_id: Identifier | None = None
-    clarifications: list[ClarificationWorkflowRecord] = Field(default_factory=list)
-    reviews: dict[PartyRole, ParticipantReview] = Field(default_factory=dict)
+    questions: list[UnderstandingQuestion] = Field(default_factory=list)
+    understanding_reviews: dict[PartyRole, ParticipantUnderstandingReview] = Field(
+        default_factory=dict
+    )
     active_participant_id: PartyRole | None = None
-    teachbacks: list[TeachbackRecord] = Field(default_factory=list)
     confirmations: list[ConfirmationRecord] = Field(default_factory=list)
     receipt_id: Identifier | None = None
     receipt_ready: bool = False
@@ -348,13 +324,6 @@ class AnalyzeLiveSessionSubmission(StrictModel):
     expected_agreement_version_id: Identifier | None = None
 
 
-class ClarificationAnswerSubmission(StrictModel):
-    expected_agreement_version_id: Identifier
-    participant_id: PartyRole
-    answer: str = Field(min_length=2, max_length=2000)
-    request_id: Identifier
-
-
 class AdditionalStatementsSubmission(StrictModel):
     expected_agreement_version_id: Identifier
     messages: list[AnalysisMessage] = Field(min_length=1, max_length=20)
@@ -368,29 +337,13 @@ class NotApplicableProposalSubmission(StrictModel):
     request_id: Identifier
 
 
-class LeaveClarificationUnresolvedSubmission(StrictModel):
-    expected_agreement_version_id: Identifier
-    request_id: Identifier
-
-
 class OptionalDetailsReviewedSubmission(StrictModel):
     expected_agreement_version_id: Identifier
     request_id: Identifier
 
 
-class StartReviewSubmission(StrictModel):
+class StartUnderstandingCheckSubmission(StrictModel):
     expected_agreement_version_id: Identifier
-    acknowledged_unresolved_item_keys: list[Identifier] = Field(
-        default_factory=list, max_length=20
-    )
-    request_id: Identifier
-
-
-class TeachbackSubmission(StrictModel):
-    expected_agreement_version_id: Identifier
-    participant_id: PartyRole
-    text: str = Field(min_length=2, max_length=4000)
-    original_language: LanguageCode = LanguageCode.ENGLISH
     acknowledged_unresolved_item_keys: list[Identifier] = Field(
         default_factory=list, max_length=20
     )
@@ -400,7 +353,7 @@ class TeachbackSubmission(StrictModel):
 class ConfirmationSubmission(StrictModel):
     expected_agreement_version_id: Identifier
     participant_id: PartyRole
-    teachback_id: Identifier
+    understanding_review_id: Identifier
     decision: ConfirmationDecision
     unresolved_item_acknowledgments: list[Identifier] = Field(
         default_factory=list, max_length=20

@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  FormEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -17,16 +16,17 @@ import {
   GuidedTermList,
   ParticipantPositions,
 } from "@/components/live-guided-terms";
+import { PrivateChoiceQuestion } from "@/components/private-choice-question";
 import {
   api,
   MeaningSyncApiError,
   type AgreementTerm,
   type AgreementVersion,
   type AgreementVersionChange,
-  type LiveClarification,
   type LiveGuidanceAction,
   type LiveSessionView,
   type PartyRole,
+  type UnderstandingQuestion,
 } from "@/lib/api";
 
 const roleNames: Record<PartyRole, string> = {
@@ -34,13 +34,34 @@ const roleNames: Record<PartyRole, string> = {
   worker: "Electrician",
 };
 
-type DetailView = "summary" | "clarification" | "optional" | "review";
+type DetailView =
+  | "summary"
+  | "clarification"
+  | "question_handoff"
+  | "optional"
+  | "review";
 type OptionalChoice = {
   kind: "open" | "not_applicable" | "add";
   speaker: PartyRole;
   text: string;
   proposedBy: PartyRole[];
 };
+
+type PrivateTurnDraft = {
+  privacyKey: string;
+  handoffReady: boolean;
+  selectedOptionId: string;
+  otherText: string;
+};
+
+function emptyPrivateTurnDraft(): PrivateTurnDraft {
+  return {
+    privacyKey: "",
+    handoffReady: false,
+    selectedOptionId: "",
+    otherText: "",
+  };
+}
 
 function requestId() {
   return globalThis.crypto?.randomUUID?.() ?? `request-${Date.now()}`;
@@ -61,22 +82,6 @@ function keyedTerms(version: AgreementVersion | null, keys: string[]) {
     const term = lookup.get(key);
     return term ? [term] : [];
   });
-}
-
-function latestTeachbackFor(
-  session: LiveSessionView,
-  participant: PartyRole | null,
-) {
-  if (!participant) return null;
-  return (
-    [...session.teachbacks]
-      .reverse()
-      .find(
-        (item) =>
-          item.participant_id === participant &&
-          item.agreement_version_id === session.current_agreement_version_id,
-      ) ?? null
-  );
 }
 
 function FlowError({
@@ -112,21 +117,17 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<MeaningSyncApiError | null>(null);
   const [detailView, setDetailView] = useState<DetailView>("summary");
-  const [clarificationDismissed, setClarificationDismissed] = useState(false);
-  const [handoffReady, setHandoffReady] = useState(false);
-  const [selectedAnswer, setSelectedAnswer] = useState("");
-  const [customAnswer, setCustomAnswer] = useState("");
-  const [clarificationOutcome, setClarificationOutcome] = useState<
-    "resolved" | "still_unresolved" | null
-  >(null);
-  const [outcomeClarificationId, setOutcomeClarificationId] = useState<string | null>(null);
-  const [outcomeWasShared, setOutcomeWasShared] = useState(false);
+  const [questionDismissed, setQuestionDismissed] = useState(false);
+  const [privateTurnDraft, setPrivateTurnDraft] = useState<PrivateTurnDraft>(
+    emptyPrivateTurnDraft,
+  );
+  const [outcomeQuestionId, setOutcomeQuestionId] = useState<string | null>(null);
   const [optionalChoices, setOptionalChoices] = useState<
     Record<string, OptionalChoice>
   >({});
   const [unresolvedAcknowledged, setUnresolvedAcknowledged] = useState(false);
-  const [teachbackText, setTeachbackText] = useState("");
   const [changeItemKey, setChangeItemKey] = useState("");
+  const requestIdsRef = useRef(new Map<string, string>());
 
   const loadSession = useCallback(async () => {
     setLoading(true);
@@ -134,7 +135,8 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
     try {
       setSession(await api.getLiveSession(sessionId));
       setDetailView("summary");
-      setClarificationDismissed(false);
+      setQuestionDismissed(false);
+      setPrivateTurnDraft(emptyPrivateTurnDraft());
     } catch (caught) {
       setError(
         caught instanceof MeaningSyncApiError
@@ -154,7 +156,8 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
         if (!current) return;
         setSession(next);
         setDetailView("summary");
-        setClarificationDismissed(false);
+        setQuestionDismissed(false);
+        setPrivateTurnDraft(emptyPrivateTurnDraft());
         setError(null);
       })
       .catch((caught: unknown) => {
@@ -195,12 +198,38 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
       ) ?? [],
     [version],
   );
-  const activeClarification =
-    session && guidance?.active_clarification_id
-      ? session.clarifications.find(
-          (item) => item.id === guidance.active_clarification_id,
+  const activeQuestion =
+    session && guidance?.active_question_id
+      ? session.questions.find(
+          (item) => item.id === guidance.active_question_id,
         ) ?? null
       : null;
+  const privacyKey = `${version?.id ?? "none"}:${activeQuestion?.id ?? "none"}:${actor ?? "none"}`;
+  const currentPrivateTurn =
+    privateTurnDraft.privacyKey === privacyKey
+      ? privateTurnDraft
+      : { ...emptyPrivateTurnDraft(), privacyKey };
+  const handoffReady = currentPrivateTurn.handoffReady;
+  const selectedOptionId = currentPrivateTurn.selectedOptionId;
+  const otherText = currentPrivateTurn.otherText;
+  const updatePrivateTurn = (update: Partial<PrivateTurnDraft>) => {
+    setPrivateTurnDraft((current) => ({
+      ...(current.privacyKey === privacyKey
+        ? current
+        : { ...emptyPrivateTurnDraft(), privacyKey }),
+      ...update,
+      privacyKey,
+    }));
+  };
+  const setHandoffReady = (ready: boolean) => {
+    updatePrivateTurn({ handoffReady: ready });
+  };
+  const setSelectedOptionId = (optionId: string) => {
+    updatePrivateTurn({ selectedOptionId: optionId });
+  };
+  const setOtherText = (text: string) => {
+    updatePrivateTurn({ otherText: text });
+  };
 
   useEffect(() => {
     if (!loading && session && guidance) {
@@ -208,14 +237,26 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
     }
   }, [
     actor,
-    clarificationOutcome,
     detailView,
     error,
     guidance,
     handoffReady,
     loading,
+    outcomeQuestionId,
     session,
   ]);
+
+  const requestIdFor = (key: string) => {
+    const current = requestIdsRef.current.get(key);
+    if (current) return current;
+    const next = requestId();
+    requestIdsRef.current.set(key, next);
+    return next;
+  };
+
+  const clearRequestId = (key: string) => {
+    requestIdsRef.current.delete(key);
+  };
 
   const setMutationError = (caught: unknown) => {
     setError(
@@ -225,32 +266,32 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
     );
   };
 
-  const leaveUnresolved = async (clarificationId?: string) => {
-    if (!session || !version) return;
-    const targetId =
-      clarificationId ??
-      activeClarification?.id ??
-      [...session.clarifications]
-        .reverse()
-        .find((item) => item.status === "still_unresolved")?.id;
+  const leaveUnresolved = async (questionId?: string) => {
+    if (!session || !version || !actor) return;
+    const targetId = questionId ?? activeQuestion?.id ?? outcomeQuestionId;
     if (!targetId) return;
+    const idempotencyKey = `leave:${version.id}:${targetId}:${actor}`;
     setSaving(true);
     setError(null);
     try {
-      const next = await api.leaveLiveClarificationUnresolved(
+      const next = await api.leaveLiveQuestionUnresolved(
         session.id,
         targetId,
         {
           expected_agreement_version_id: version.id,
-          request_id: requestId(),
+          participant_id: actor,
+          request_id: requestIdFor(idempotencyKey),
         },
       );
+      const updated = next.questions.find((item) => item.id === targetId);
+      clearRequestId(idempotencyKey);
       setSession(next);
       setDetailView("summary");
-      setClarificationOutcome(null);
-      setOutcomeClarificationId(null);
+      setOutcomeQuestionId(updated?.responses_revealed ? updated.id : null);
       setHandoffReady(false);
-      setClarificationDismissed(false);
+      setQuestionDismissed(false);
+      setSelectedOptionId("");
+      setOtherText("");
     } catch (caught) {
       setMutationError(caught);
     } finally {
@@ -258,37 +299,39 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
     }
   };
 
-  const submitClarification = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!session || !version || !activeClarification || !actor) return;
-    const answer =
-      selectedAnswer === "__custom__" ? customAnswer.trim() : selectedAnswer.trim();
-    if (answer.length < 2) return;
+  const submitSelection = async () => {
+    if (!session || !version || !activeQuestion || !actor) return;
+    const option = activeQuestion.options.find(
+      (item) => item.id === selectedOptionId,
+    );
+    const typedOther = otherText.trim();
+    if (!option || (option.kind === "other" && typedOther.length < 2)) return;
+    const idempotencyKey = `selection:${version.id}:${activeQuestion.id}:${actor}`;
     setSaving(true);
     setError(null);
     try {
-      const next = await api.submitLiveClarificationAnswer(
+      const next = await api.submitUnderstandingSelection(
         session.id,
-        activeClarification.id,
+        activeQuestion.id,
         {
           participant_id: actor,
-          answer,
+          option_id: option.id,
+          ...(option.kind === "other" ? { other_text: typedOther } : {}),
           expected_agreement_version_id: version.id,
-          request_id: requestId(),
+          request_id: requestIdFor(idempotencyKey),
         },
       );
-      const updated = next.clarifications.find(
-        (item) => item.id === activeClarification.id,
+      const updated = next.questions.find(
+        (item) => item.id === activeQuestion.id,
       );
+      clearRequestId(idempotencyKey);
       setSession(next);
-      setSelectedAnswer("");
-      setCustomAnswer("");
+      setSelectedOptionId("");
+      setOtherText("");
       setHandoffReady(false);
-      if (updated?.status === "resolved" || updated?.status === "still_unresolved") {
-        setClarificationOutcome(updated.status);
-        setOutcomeClarificationId(updated.id);
-        setOutcomeWasShared(activeClarification.addressed_participant_ids.length > 1);
-      }
+      setOutcomeQuestionId(updated?.responses_revealed ? updated.id : null);
+      setQuestionDismissed(false);
+      setDetailView("summary");
     } catch (caught) {
       setMutationError(caught);
     } finally {
@@ -371,7 +414,7 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
       }
 
       if (
-        next.guidance.primary_action === "answer_clarification" ||
+        next.guidance.primary_action === "submit_selection" ||
         next.guidance.primary_action === "leave_unresolved"
       ) {
         setDetailView("summary");
@@ -391,7 +434,7 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
     } catch (caught) {
       setSession(next);
       if (
-        next.guidance.primary_action === "answer_clarification" ||
+        next.guidance.primary_action === "submit_selection" ||
         next.guidance.primary_action === "leave_unresolved"
       ) {
         setDetailView("summary");
@@ -422,50 +465,22 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
 
   const beginUnderstandingCheck = async () => {
     if (!session || !version) return;
+    const idempotencyKey = `understanding-check:${version.id}`;
     setSaving(true);
     setError(null);
     try {
-      const next = await api.beginLiveReview(session.id, {
+      const next = await api.beginUnderstandingCheck(session.id, {
         expected_agreement_version_id: version.id,
         acknowledged_unresolved_item_keys: unresolvedTerms.map(
           (term) => term.analysis_item_key,
         ),
-        request_id: requestId(),
+        request_id: requestIdFor(idempotencyKey),
       });
+      clearRequestId(idempotencyKey);
       setSession(next);
       setDetailView("summary");
       setHandoffReady(false);
       setUnresolvedAcknowledged(false);
-    } catch (caught) {
-      setMutationError(caught);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const submitTeachback = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!session || !version || !actor) return;
-    const typed = teachbackText.trim();
-    if (typed.length < 12) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const next = await api.submitTeachback(session.id, {
-        participant_id: actor,
-        text: typed,
-        original_language: "en",
-        expected_agreement_version_id: version.id,
-        acknowledged_unresolved_item_keys: unresolvedTerms.map(
-          (term) => term.analysis_item_key,
-        ),
-        request_id: requestId(),
-      });
-      setSession(next);
-      setTeachbackText("");
-      setHandoffReady(false);
-      setUnresolvedAcknowledged(false);
-      setDetailView("summary");
     } catch (caught) {
       setMutationError(caught);
     } finally {
@@ -475,22 +490,24 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
 
   const submitConfirmation = async (decision: "confirm" | "request_change") => {
     if (!session || !version || !actor) return;
-    const teachback = latestTeachbackFor(session, actor);
-    if (!teachback || (decision === "request_change" && !changeItemKey)) return;
+    const review = session.understanding_reviews[actor];
+    if (!review || (decision === "request_change" && !changeItemKey)) return;
+    const idempotencyKey = `confirmation:${version.id}:${actor}:${decision}:${changeItemKey}`;
     setSaving(true);
     setError(null);
     try {
       const next = await api.submitLiveConfirmation(session.id, {
         participant_id: actor,
         expected_agreement_version_id: version.id,
-        teachback_id: teachback.id,
+        understanding_review_id: review.id,
         decision,
         unresolved_item_acknowledgments: unresolvedTerms.map(
           (term) => term.analysis_item_key,
         ),
         change_item_key: decision === "request_change" ? changeItemKey : undefined,
-        request_id: requestId(),
+        request_id: requestIdFor(idempotencyKey),
       });
+      clearRequestId(idempotencyKey);
       setSession(next);
       setChangeItemKey("");
       setHandoffReady(false);
@@ -517,20 +534,22 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
   };
 
   const runGuidanceAction = (action: LiveGuidanceAction) => {
-    if (action === "answer_clarification") {
-      setClarificationDismissed(false);
+    if (action === "submit_selection") {
+      setQuestionDismissed(false);
       setDetailView("clarification");
       return;
     }
     if (action === "leave_unresolved") {
-      void leaveUnresolved();
+      setQuestionDismissed(false);
+      setHandoffReady(false);
+      setDetailView("question_handoff");
       return;
     }
     if (action === "review_optional_details") {
       setDetailView("optional");
       return;
     }
-    if (action === "review_final_understanding") {
+    if (action === "start_understanding_check") {
       void openFinalReview();
       return;
     }
@@ -578,99 +597,97 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
     );
   }
 
-  const forceClarification =
+  const forceQuestion =
     detailView === "clarification" ||
-    (Boolean(activeClarification?.answers_received_from.length) &&
-      !clarificationDismissed);
+    detailView === "question_handoff" ||
+    activeQuestion?.kind === "understanding_check" ||
+    (Boolean(activeQuestion?.answered_participant_ids.length) &&
+      !questionDismissed);
   const showOptional =
     detailView === "optional" ||
     guidance.primary_action === "review_optional_details";
-  const outcomeClarification = session.clarifications.find(
-    (item) => item.id === outcomeClarificationId,
+  const outcomeQuestion = session.questions.find(
+    (item) => item.id === outcomeQuestionId,
   );
   const outcomeChange = version?.has_meaningful_change
     ? version.changes.find(
         (change) =>
-          change.item_key === outcomeClarification?.target_item_key,
+          change.item_key === outcomeQuestion?.agreement_item_id,
       ) ?? null
     : null;
-  const outcomeTerm = outcomeChange
-    ? version?.terms.find(
-        (term) => term.analysis_item_key === outcomeChange.item_key,
-      ) ?? null
-    : null;
+  const outcomeTerm =
+    version?.terms.find(
+      (term) => term.analysis_item_key === outcomeQuestion?.agreement_item_id,
+    ) ?? null;
 
   let task: React.ReactNode;
-  if (clarificationOutcome) {
+  if (outcomeQuestion?.outcome) {
     task = (
-      <ClarificationOutcome
-        outcome={clarificationOutcome}
-        sharedAnswers={outcomeWasShared}
+      <QuestionOutcome
+        question={outcomeQuestion}
         change={outcomeChange}
         changedTerm={outcomeTerm}
-        guidance={guidance}
         saving={saving}
         onContinue={() => {
-          if (guidance.primary_action === "leave_unresolved") {
-            void leaveUnresolved(outcomeClarificationId ?? undefined);
-            return;
-          }
-          setClarificationOutcome(null);
-          setOutcomeClarificationId(null);
-          if (guidance.primary_action === "answer_clarification") {
-            setDetailView("clarification");
+          setOutcomeQuestionId(null);
+          setHandoffReady(false);
+          if (
+            guidance.primary_action === "submit_selection" ||
+            guidance.primary_action === "leave_unresolved"
+          ) {
+            setDetailView("question_handoff");
           } else if (guidance.primary_action === "review_optional_details") {
             setDetailView("optional");
           } else {
             setDetailView("summary");
           }
         }}
-        canLeave={
-          Boolean(outcomeClarificationId) &&
-          guidance.secondary_action === "leave_unresolved"
-        }
-        onLeave={() => void leaveUnresolved(outcomeClarificationId ?? undefined)}
       />
     );
   } else if (
     guidance.primary_action === "leave_unresolved" &&
-    activeClarification &&
-    forceClarification
+    activeQuestion &&
+    forceQuestion
   ) {
     task = (
-      <StillDifferentTask
-        clarification={activeClarification}
+      <LeaveUnresolvedTask
+        question={activeQuestion}
         term={activeTerm}
+        actor={actor}
+        handoffReady={handoffReady}
         label={guidance.primary_label}
         saving={saving}
-        onLeave={() => void leaveUnresolved(activeClarification.id)}
+        onHandoff={() => setHandoffReady(true)}
+        onLeave={() => void leaveUnresolved(activeQuestion.id)}
         onBack={() => {
           setDetailView("summary");
-          setClarificationDismissed(true);
+          setQuestionDismissed(true);
         }}
       />
     );
   } else if (
-    guidance.primary_action === "answer_clarification" &&
-    forceClarification &&
-    activeClarification
+    guidance.primary_action === "submit_selection" &&
+    forceQuestion &&
+    activeQuestion &&
+    actor
   ) {
     task = (
-      <ClarificationTask
-        clarification={activeClarification}
+      <ChoiceQuestionTask
+        question={activeQuestion}
         term={activeTerm}
         actor={actor}
         handoffReady={handoffReady}
+        forceHandoff={detailView === "question_handoff"}
         saving={saving}
-        selectedAnswer={selectedAnswer}
-        customAnswer={customAnswer}
+        selectedOptionId={selectedOptionId}
+        otherText={otherText}
         onHandoff={() => setHandoffReady(true)}
-        onSelectAnswer={setSelectedAnswer}
-        onCustomAnswer={setCustomAnswer}
-        onSubmit={submitClarification}
+        onSelectOption={setSelectedOptionId}
+        onOtherText={setOtherText}
+        onSubmit={() => void submitSelection()}
         onBack={() => {
           setDetailView("summary");
-          setClarificationDismissed(true);
+          setQuestionDismissed(true);
           setHandoffReady(false);
         }}
         onLeave={() => void leaveUnresolved()}
@@ -699,29 +716,13 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
         onBack={() => setDetailView(optionalTerms.length ? "optional" : "summary")}
       />
     );
-  } else if (guidance.primary_action === "submit_teachback" && actor) {
-    task = (
-      <UnderstandingCheck
-        session={session}
-        actor={actor}
-        version={version}
-        handoffReady={handoffReady}
-        text={teachbackText}
-        acknowledged={unresolvedAcknowledged}
-        saving={saving}
-        onHandoff={() => setHandoffReady(true)}
-        onText={setTeachbackText}
-        onAcknowledge={setUnresolvedAcknowledged}
-        onSubmit={submitTeachback}
-        onLock={() => setHandoffReady(false)}
-      />
-    );
   } else if (guidance.primary_action === "submit_confirmation" && actor) {
     task = (
       <ConfirmationTask
         session={session}
         actor={actor}
         version={version}
+        guidance={guidance}
         handoffReady={handoffReady}
         acknowledged={unresolvedAcknowledged}
         changeItemKey={changeItemKey}
@@ -830,157 +831,176 @@ function ResultSummary({
   );
 }
 
-function ClarificationTask({
-  clarification,
+function ChoiceQuestionTask({
+  question,
   term,
   actor,
   handoffReady,
+  forceHandoff,
   saving,
-  selectedAnswer,
-  customAnswer,
+  selectedOptionId,
+  otherText,
   onHandoff,
-  onSelectAnswer,
-  onCustomAnswer,
+  onSelectOption,
+  onOtherText,
   onSubmit,
   onBack,
   onLeave,
 }: {
-  clarification: LiveClarification;
+  question: UnderstandingQuestion;
   term: AgreementTerm | null;
-  actor: PartyRole | null;
+  actor: PartyRole;
   handoffReady: boolean;
+  forceHandoff: boolean;
   saving: boolean;
-  selectedAnswer: string;
-  customAnswer: string;
+  selectedOptionId: string;
+  otherText: string;
   onHandoff: () => void;
-  onSelectAnswer: (answer: string) => void;
-  onCustomAnswer: (answer: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSelectOption: (optionId: string) => void;
+  onOtherText: (text: string) => void;
+  onSubmit: () => void;
   onBack: () => void;
   onLeave: () => void;
 }) {
-  const retrying = clarification.status === "still_unresolved";
-  const someoneAnswered =
-    !retrying && clarification.answers_received_from.length > 0;
-  if (retrying && !handoffReady && actor) {
+  const completed = question.answered_participant_ids[0];
+  const requiresHandoff =
+    forceHandoff || question.kind === "understanding_check" || Boolean(completed);
+  if (requiresHandoff && !handoffReady) {
     return (
-      <section className="guided-task handoff-task" aria-labelledby="retry-handoff-title">
+      <section
+        className="guided-task handoff-task"
+        aria-labelledby={`handoff-${question.id}`}
+      >
         <div className="handoff-symbol" aria-hidden="true">↗</div>
-        <p className="eyebrow">Try one fresh clarification</p>
-        <h1 id="retry-handoff-title">Pass the device to {roleNames[actor]}.</h1>
-        <p>The earlier answers were still different. They remain hidden while {roleNames[actor]} starts a fresh answer.</p>
+        <p className="eyebrow">
+          {completed
+            ? "Choice hidden"
+            : question.kind === "understanding_check"
+              ? "Check understanding"
+              : "Private clarification"}
+        </p>
+        <h1 id={`handoff-${question.id}`}>
+          Pass the device to {roleNames[actor]}.
+        </h1>
+        <p>
+          {completed
+            ? `${roleNames[completed]} chose privately. Their choice stays hidden until both people answer.`
+            : "Only this person should see and complete the next question."}
+        </p>
         <button className="button primary" type="button" onClick={onHandoff}>
-          I’m {roleNames[actor]} — try again <span>→</span>
-        </button>
-        <small>This same-device handoff is not identity verification or strong privacy.</small>
-      </section>
-    );
-  }
-  if (someoneAnswered && !handoffReady && actor) {
-    const completed = clarification.answers_received_from[0];
-    return (
-      <section className="guided-task handoff-task" aria-labelledby="handoff-title">
-        <div className="handoff-symbol" aria-hidden="true">↗</div>
-        <p className="eyebrow">Answer hidden</p>
-        <h1 id="handoff-title">Pass the device to {roleNames[actor]}.</h1>
-        <p>{completed ? `${roleNames[completed]} answered. Their response stays hidden until both people answer.` : "The first response is hidden."}</p>
-        <button className="button primary" type="button" onClick={onHandoff}>
-          I’m {roleNames[actor]} — answer the question <span>→</span>
+          I’m {roleNames[actor]} — start <span>→</span>
         </button>
         <small>This same-device handoff is not identity verification or strong privacy.</small>
       </section>
     );
   }
 
-  if (!actor) {
-    return <section className="guided-task"><p className="guided-empty">Both answers were received. MeaningSync is checking them.</p></section>;
-  }
-
-  const options = clarification.answer_options.filter(
-    (option) => !/write a different answer/i.test(option),
-  );
-  const answer = selectedAnswer === "__custom__" ? customAnswer.trim() : selectedAnswer.trim();
   return (
-    <section className="guided-task clarification-task" aria-labelledby="clarification-title">
-      <button className="plain-back" type="button" onClick={onBack}>← Back to summary</button>
-      <header className="guided-heading">
-        <p className="eyebrow">One detail needs a clear answer</p>
-        <h1 id="clarification-title">{clarification.question}</h1>
-        {term && (
-          <p className="clarification-reason">
-            {term.participant_positions.map((position) => `${roleNames[position.role]}: ${position.summary}`).join(" ")}
-          </p>
-        )}
-      </header>
-      <div className="actor-turn" role="status"><span className={`avatar small ${actor === "worker" ? "worker" : ""}`}>{roleNames[actor][0]}</span><p><strong>{roleNames[actor]}’s turn</strong><span>Choose the answer that reflects what you mean.</span></p></div>
-      {term && <ParticipantPositions term={term} />}
-      {term && <EvidenceDisclosure term={term} />}
-      <form onSubmit={onSubmit}>
-        <fieldset className="answer-options">
-          <legend>{roleNames[actor]}’s answer</legend>
-          {options.map((option) => (
-            <label key={option}>
-              <input type="radio" name="clarification-answer" value={option} checked={selectedAnswer === option} onChange={() => onSelectAnswer(option)} />
-              <span>{option}</span>
-            </label>
-          ))}
-          <label>
-            <input type="radio" name="clarification-answer" value="__custom__" checked={selectedAnswer === "__custom__"} onChange={() => onSelectAnswer("__custom__")} />
-            <span>Write a different answer</span>
-          </label>
-        </fieldset>
-        {(selectedAnswer === "__custom__" || !options.length) && (
-          <div className="guided-field">
-            <label htmlFor="custom-clarification-answer">Your answer</label>
-            <textarea id="custom-clarification-answer" rows={4} value={customAnswer} onChange={(event) => { onCustomAnswer(event.target.value); if (!selectedAnswer) onSelectAnswer("__custom__"); }} placeholder="State what you mean in your own words…" />
-          </div>
-        )}
-        <div className="guided-actions">
-          <button className="button primary" type="submit" disabled={saving || answer.length < 2}>Submit my answer <span>→</span></button>
-          <button className="button text-action" type="button" disabled={saving} onClick={onLeave}>Leave this unresolved</button>
-        </div>
-      </form>
-    </section>
+    <PrivateChoiceQuestion
+      actorName={roleNames[actor]}
+      context={
+        term ? (
+          <>
+            <ParticipantPositions term={term} />
+            <EvidenceDisclosure term={term} />
+          </>
+        ) : undefined
+      }
+      explanation={
+        question.kind === "understanding_check"
+          ? "Choose the meaning you understood. Your choice stays private until both people answer."
+          : question.addressed_participant_ids.length > 1
+            ? "Choose the meaning you mean. Your choice stays private until both people answer."
+            : "Choose the meaning you mean. MeaningSync will record only your selection for this point."
+      }
+      eyebrow={
+        question.kind === "understanding_check"
+          ? "Choose one meaning"
+          : "One detail needs a clear answer"
+      }
+      onBack={question.kind === "clarification" ? onBack : undefined}
+      onOtherTextChange={onOtherText}
+      onSelect={onSelectOption}
+      onSubmit={onSubmit}
+      optionId={selectedOptionId}
+      options={question.options}
+      otherText={otherText}
+      prompt={question.prompt}
+      questionCount={question.question_count}
+      questionId={question.id}
+      questionNumber={question.question_number}
+      saving={saving}
+      secondaryAction={
+        question.kind === "clarification"
+          ? { label: "Leave this unresolved", onClick: onLeave }
+          : undefined
+      }
+    />
   );
 }
 
-function ClarificationOutcome({
-  outcome,
-  sharedAnswers,
+function QuestionOutcome({
+  question,
   change,
   changedTerm,
-  guidance,
   saving,
   onContinue,
-  canLeave,
-  onLeave,
 }: {
-  outcome: "resolved" | "still_unresolved";
-  sharedAnswers: boolean;
+  question: UnderstandingQuestion;
   change: AgreementVersionChange | null;
   changedTerm: AgreementTerm | null;
-  guidance: LiveSessionView["guidance"];
   saving: boolean;
   onContinue: () => void;
-  canLeave: boolean;
-  onLeave: () => void;
 }) {
-  const resolved = outcome === "resolved";
+  const outcome = question.outcome!;
+  const positive =
+    outcome.state === "aligned" || outcome.state === "meaning_changed";
+  const title = {
+    aligned: "This detail is now clear",
+    meaning_changed: "The recorded meaning changed",
+    different: "You understood this differently",
+    unsure: "This point is still unclear",
+    left_unresolved: "This point remains unresolved",
+  }[outcome.state];
+  const explanation = {
+    aligned: "The independent choices matched. MeaningSync can continue without asking this meaning again.",
+    meaning_changed: "Both people chose the same different meaning, so the earlier record was not silently confirmed.",
+    different: "MeaningSync kept this item separate and returned only this point to clarification.",
+    unsure: "Uncertainty is not agreement. Review the recorded statements before choosing again or leaving this unresolved.",
+    left_unresolved: "The receipt will preserve this point as unresolved. It was not converted into agreement.",
+  }[outcome.state];
   return (
-    <section className={`guided-task outcome-task ${resolved ? "success" : "open"}`} aria-labelledby="outcome-title">
-      <div className="outcome-symbol" aria-hidden="true">{resolved ? "✓" : "↔"}</div>
-      <p className="eyebrow">{sharedAnswers ? "Both answers checked" : "Answer checked"}</p>
-      <h1 id="outcome-title">{resolved ? "This detail is now clear" : "The answers are still different"}</h1>
-      <p>{resolved ? "MeaningSync updated the recorded understanding using both people’s answers." : "MeaningSync has kept this point unresolved. It will not be shown as agreement."}</p>
-      {resolved && change && (
+    <section className={`guided-task outcome-task ${positive ? "success" : "open"}`} aria-labelledby="outcome-title">
+      <div className="outcome-symbol" aria-hidden="true">{positive ? "✓" : outcome.state === "unsure" ? "?" : "↔"}</div>
+      <p className="eyebrow">
+        {question.addressed_participant_ids.length > 1
+          ? "Both choices checked"
+          : "Choice checked"}
+      </p>
+      <h1 id="outcome-title">{title}</h1>
+      <p>{explanation}</p>
+      {outcome.positions.length > 0 && (
+        <div className="outcome-positions" aria-label="Recorded choices">
+          {outcome.positions.map((position) => (
+            <div key={position.participant_id}>
+              <span>{roleNames[position.participant_id]}</span>
+              <strong>{position.label}</strong>
+              {position.other_text && <p>{position.other_text}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+      {(outcome.state === "unsure" || outcome.state === "different") && changedTerm && (
+        <EvidenceDisclosure term={changedTerm} />
+      )}
+      {outcome.state === "meaning_changed" && change && (
         <div className="outcome-update">
           <div className="plain-success">Updated: {change.resulting_meaning}</div>
           <NewSupportingEvidence change={change} term={changedTerm} />
         </div>
       )}
       <div className="guided-actions">
-        <button className="button primary" type="button" disabled={saving} onClick={onContinue}>{guidance.primary_label} <span>→</span></button>
-        {!resolved && canLeave && <button className="button text-action" type="button" disabled={saving} onClick={onLeave}>Leave it unresolved</button>}
+        <button className="button primary" type="button" disabled={saving} onClick={onContinue}>Continue <span>→</span></button>
       </div>
     </section>
   );
@@ -1013,32 +1033,52 @@ function NewSupportingEvidence({
   );
 }
 
-function StillDifferentTask({
-  clarification,
+function LeaveUnresolvedTask({
+  question,
   term,
+  actor,
+  handoffReady,
   label,
   saving,
+  onHandoff,
   onLeave,
   onBack,
 }: {
-  clarification: LiveClarification;
+  question: UnderstandingQuestion;
   term: AgreementTerm | null;
+  actor: PartyRole | null;
+  handoffReady: boolean;
   label: string;
   saving: boolean;
+  onHandoff: () => void;
   onLeave: () => void;
   onBack: () => void;
 }) {
+  if (actor && !handoffReady) {
+    return (
+      <section className="guided-task handoff-task" aria-labelledby={`leave-handoff-${question.id}`}>
+        <div className="handoff-symbol" aria-hidden="true">↗</div>
+        <p className="eyebrow">Private decision</p>
+        <h1 id={`leave-handoff-${question.id}`}>Pass the device to {roleNames[actor]}.</h1>
+        <p>Each person must independently choose whether this point should remain unresolved.</p>
+        <button className="button primary" type="button" onClick={onHandoff}>
+          I’m {roleNames[actor]} — continue <span>→</span>
+        </button>
+        <small>This same-device handoff is not identity verification or strong privacy.</small>
+      </section>
+    );
+  }
   return (
     <section className="guided-task outcome-task open" aria-labelledby="still-different-title">
       <button className="plain-back" type="button" onClick={onBack}>← Back to summary</button>
       <div className="outcome-symbol" aria-hidden="true">↔</div>
-      <p className="eyebrow">Clarification checked</p>
-      <h1 id="still-different-title">This point is still different</h1>
-      <p>{clarification.question}</p>
+      <p className="eyebrow">Keep this point open</p>
+      <h1 id="still-different-title">Leave this point unresolved?</h1>
+      <p>{question.prompt}</p>
       {term && <ParticipantPositions term={term} />}
       {term && <EvidenceDisclosure term={term} />}
       <div className="guided-actions">
-        <button className="button primary" type="button" disabled={saving} onClick={onLeave}>{label} <span>→</span></button>
+        <button className="button primary" type="button" disabled={saving || !actor} onClick={onLeave}>{label} <span>→</span></button>
       </div>
     </section>
   );
@@ -1183,58 +1223,11 @@ function FinalReview({
   );
 }
 
-function UnderstandingCheck({
-  session,
-  actor,
-  version,
-  handoffReady,
-  text,
-  acknowledged,
-  saving,
-  onHandoff,
-  onText,
-  onAcknowledge,
-  onSubmit,
-  onLock,
-}: {
-  session: LiveSessionView;
-  actor: PartyRole;
-  version: AgreementVersion | null;
-  handoffReady: boolean;
-  text: string;
-  acknowledged: boolean;
-  saving: boolean;
-  onHandoff: () => void;
-  onText: (text: string) => void;
-  onAcknowledge: (checked: boolean) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onLock: () => void;
-}) {
-  if (!handoffReady) {
-    const complete = session.teachbacks.some((item) => item.participant_id !== actor && item.agreement_version_id === version?.id);
-    return <section className="guided-task handoff-task"><div className="handoff-symbol" aria-hidden="true">↗</div><p className="eyebrow">Check understanding</p><h1>Pass the device to {roleNames[actor]}.</h1><p>{complete ? "The other person’s explanation is hidden. Now it is this person’s turn." : "Only this person should see and complete the next screen."}</p><button className="button primary" type="button" onClick={onHandoff}>I’m {roleNames[actor]} — start <span>→</span></button><small>This is a guided same-device handoff, not identity verification.</small></section>;
-  }
-  const previous = latestTeachbackFor(session, actor);
-  const focused = previous?.overall_state === "partially_matches" || previous?.overall_state === "insufficient";
-  const unresolved = version?.terms.filter((term) => term.state === "conflicting" || term.state === "stated_by_one") ?? [];
-  const followUp = previous?.follow_up_question ?? previous?.missing_or_contradictory_summary;
-  return (
-    <section className="guided-task understanding-task" aria-labelledby="understanding-title">
-      <header className="guided-heading"><p className="eyebrow">{roleNames[actor]} · private turn</p><h1 id="understanding-title">{focused ? "One detail is missing from your explanation." : "Explain the agreement in your own words"}</h1><p>{focused ? followUp : "This checks that both people understood the same terms. It does not change the agreement."}</p></header>
-      {previous?.overall_state === "matches" && <div className="plain-success" role="status">Your understanding matches the recorded terms.</div>}
-      <form onSubmit={onSubmit}>
-        <div className="guided-field"><label htmlFor="understanding-text">{focused ? (followUp ?? "Add the missing detail") : `${roleNames[actor]}’s explanation`}</label><textarea id="understanding-text" rows={focused ? 4 : 7} value={text} maxLength={4000} onChange={(event) => onText(event.target.value)} placeholder={focused ? "Add only the missing detail…" : "For example: I understand that the work includes…"} /></div>
-        {unresolved.length > 0 && <label className="section-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => onAcknowledge(event.target.checked)} /><span>I understand the final record will show {unresolved.length === 1 ? "this point" : "these points"} as unresolved.</span></label>}
-        <div className="guided-actions"><button className="button primary" type="submit" disabled={saving || text.trim().length < 12 || (unresolved.length > 0 && !acknowledged)}>{focused ? "Submit this detail" : "Submit my explanation"} <span>→</span></button><button className="button text-action" type="button" onClick={onLock}>Lock and return to handoff</button></div>
-      </form>
-    </section>
-  );
-}
-
 function ConfirmationTask({
   session,
   actor,
   version,
+  guidance,
   handoffReady,
   acknowledged,
   changeItemKey,
@@ -1247,6 +1240,7 @@ function ConfirmationTask({
   session: LiveSessionView;
   actor: PartyRole;
   version: AgreementVersion | null;
+  guidance: LiveSessionView["guidance"];
   handoffReady: boolean;
   acknowledged: boolean;
   changeItemKey: string;
@@ -1257,8 +1251,14 @@ function ConfirmationTask({
   onSubmit: (decision: "confirm" | "request_change") => void;
 }) {
   const otherConfirmation = session.confirmations.find((item) => item.participant_id !== actor && item.agreement_version_id === version?.id && item.invalidated_at === null);
+  const guidanceNotice = (
+    <div className="confirmation-guidance" role="status">
+      <strong>{guidance.headline}</strong>
+      <span>{guidance.explanation}</span>
+    </div>
+  );
   if (!handoffReady) {
-    return <section className="guided-task handoff-task"><div className="handoff-symbol" aria-hidden="true">↗</div><p className="eyebrow">Separate confirmation</p><h1>{otherConfirmation ? `${roleNames[otherConfirmation.participant_id]} confirmed. Pass the device to ${roleNames[actor]}.` : `Pass the device to ${roleNames[actor]}.`}</h1><p>Only {roleNames[actor]} should use the next confirmation controls.</p><button className="button primary" type="button" onClick={onHandoff}>I’m {roleNames[actor]} — review <span>→</span></button><small>MeaningSync does not verify identity.</small></section>;
+    return <section className="guided-task handoff-task"><div className="handoff-symbol" aria-hidden="true">↗</div><p className="eyebrow">Separate confirmation</p><h1>{otherConfirmation ? `${roleNames[otherConfirmation.participant_id]} confirmed. Pass the device to ${roleNames[actor]}.` : `Pass the device to ${roleNames[actor]}.`}</h1>{guidanceNotice}<p>Only {roleNames[actor]} should use the next confirmation controls.</p><button className="button primary" type="button" onClick={onHandoff}>I’m {roleNames[actor]} — review <span>→</span></button><small>MeaningSync does not verify identity.</small></section>;
   }
   const unresolved = version?.terms.filter((term) => term.state === "conflicting" || term.state === "stated_by_one") ?? [];
   const mutualProposalKeys = new Set(
@@ -1277,6 +1277,7 @@ function ConfirmationTask({
   return (
     <section className="guided-task confirmation-task" aria-labelledby="confirm-title">
       <header className="guided-heading"><p className="eyebrow">{roleNames[actor]} · separate confirmation</p><h1 id="confirm-title">Confirm your understanding</h1><p>This records that you reviewed the displayed summary. It is not a signature or identity check.</p></header>
+      {guidanceNotice}
       <div className="confirmation-summary">
         <GuidedTermList terms={regularTerms} proposals={version?.not_applicable_proposals ?? []} />
         {mutualNotApplicable.length > 0 && <section className="confirmation-mutual-na"><h2>Both marked not applicable</h2><GuidedTermList terms={mutualNotApplicable} proposals={version?.not_applicable_proposals ?? []} /></section>}

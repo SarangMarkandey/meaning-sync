@@ -43,6 +43,8 @@ const term = (state: AgreementTerm["state"], label: string): AgreementTerm => ({
   clarification_target: null,
 });
 
+const integrityHash = "a".repeat(64);
+
 const receipt: LiveClarityReceipt = {
   id: "receipt-123",
   session_id: "live-1",
@@ -73,11 +75,13 @@ const receipt: LiveClarityReceipt = {
       resulting_agreement_version_id: "version-2",
       response_message_ids: { hirer: "c1", worker: "c2" },
       status: "still_unresolved",
+      fingerprint: "materials-conflict",
+      semantic_target: "materials inclusion",
     },
   ],
-  teachback_status: [
-    { participant_id: "hirer", teachback_id: "tb-1", result: "matches", completed_at: "2026-07-16T10:50:00Z" },
-    { participant_id: "worker", teachback_id: "tb-2", result: "matches", completed_at: "2026-07-16T10:52:00Z" },
+  understanding_status: [
+    { participant_id: "hirer", review_id: "review-1", result: "completed", completed_at: "2026-07-16T10:50:00Z", question_ids: ["question-1"] },
+    { participant_id: "worker", review_id: "review-2", result: "completed", completed_at: "2026-07-16T10:52:00Z", question_ids: ["question-1"] },
   ],
   confirmations: [
     { participant_id: "hirer", confirmation_id: "confirm-1", confirmed_at: "2026-07-16T10:55:00Z", language: "en" },
@@ -86,7 +90,7 @@ const receipt: LiveClarityReceipt = {
   status: "contains_unresolved_items",
   application_version: "meaningsync-m4",
   schema_version: "clarity-receipt-v1",
-  integrity_hash: "sha256:abc123",
+  integrity_hash: integrityHash,
   disclaimer:
     "This clarity receipt records the participants’ stated understanding. MeaningSync does not provide legal advice, and this receipt is not presented as a legally enforceable contract.",
 };
@@ -113,9 +117,9 @@ describe("ClarityReceiptView", () => {
     fireEvent.click(screen.getByText("Not discussed or proposed not applicable"));
     expect(screen.getByText("Completion time recorded meaning.")).toBeVisible();
     expect(screen.getByText(receipt.disclaimer)).toBeVisible();
-    expect(screen.getByText("sha256:abc123")).not.toBeVisible();
+    expect(screen.getByText(integrityHash)).not.toBeVisible();
     fireEvent.click(screen.getByText("Advanced details"));
-    expect(screen.getByText("sha256:abc123")).toBeVisible();
+    expect(screen.getByText(integrityHash)).toBeVisible();
     expect(screen.getByText(/not a digital signature/i)).toBeVisible();
   });
 

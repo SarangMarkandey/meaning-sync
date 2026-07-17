@@ -19,11 +19,9 @@ const roleNames: Record<PartyRole, string> = {
 };
 
 const languageNames = { en: "English", hi: "Hindi" } as const;
-const comparisonNames = {
-  matches: "Understanding matched",
-  partially_matches: "A focused follow-up was needed",
-  contradicts: "A difference was returned to clarification",
-  insufficient: "More detail was needed",
+const understandingStatusNames = {
+  completed: "Completed",
+  skipped: "No additional question was needed",
 } as const;
 
 export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
@@ -196,7 +194,7 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
               </section>
               <section>
                 <h2>Understanding checks</h2>
-                <ul>{receipt.teachback_status.map((item) => <li key={item.teachback_id}>{roleNames[item.participant_id]} — {comparisonNames[item.result]}</li>)}</ul>
+                <ul>{receipt.understanding_status.map((item) => <li key={item.review_id}>{roleNames[item.participant_id]} — {understandingStatusNames[item.result]}</li>)}</ul>
               </section>
               {receipt.clarification_history.length > 0 && (
                 <section>

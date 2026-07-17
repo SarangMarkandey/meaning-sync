@@ -5,7 +5,7 @@ import type { LiveUserStage } from "@/lib/api";
 const stages: Array<{ id: LiveUserStage; label: string }> = [
   { id: "conversation", label: "Conversation" },
   { id: "clarify", label: "Clarify" },
-  { id: "review", label: "Review" },
+  { id: "check_understanding", label: "Check understanding" },
   { id: "confirm", label: "Confirm" },
   { id: "receipt", label: "Receipt" },
 ];

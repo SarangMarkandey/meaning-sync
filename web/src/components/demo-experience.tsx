@@ -347,7 +347,7 @@ export function DemoExperience({
                     </p>
                   </div>
                   <div className="teachback">
-                    <span>Shared teach-back</span>
+                    <span>Shared understanding check</span>
                     <p>{defaultTeachback}</p>
                   </div>
                   <div className="confirmation-actions">

@@ -201,3 +201,30 @@ Final verification results:
 - Visual inspection covered setup, conversation, analyzing, summary, clarification, resolved outcome, optional details, final review, both private teach-backs, both confirmations, receipt-ready, receipt, expanded integrity details, missing session, and stale version on desktop and mobile.
 - Browser verification exposed and fixed a stale local Review view after starting teach-back; validated provider questions without choices now retain application-owned safe options.
 - `git diff --check`: passed. No paid OpenAI request ran during implementation or verification; the browser harness blocked OpenAI client creation and used deterministic local fixtures.
+
+## Choice-Based Clarification and Understanding Checks
+
+**Date:** 2026-07-17
+
+- Replaced the user-facing Teach-back/Review step with **Check understanding** while preserving the server-owned lifecycle, immutable agreement versions, evidence provenance, separate confirmations, and clarity receipt.
+- Added shared `UnderstandingQuestion`, `UnderstandingOption`, and private participant-selection records for clarification and understanding-check questions. Stable option IDs and semantic values are bound to the exact session, participant, agreement item, immutable version, and supporting evidence.
+- Constructed neutral choices deterministically from recorded positions or shared meaning. Every question includes `Something else` and `I'm not sure`; short text is required only for `Something else`, and uncertainty never becomes alignment.
+- Limited Check understanding to at most one additional high-impact question after a completed two-party clarification; sessions without clarification retain the one/two-question simple-agreement policy and three-question broad-agreement cap. Server-owned independent-evidence tracking prevents wording-level duplicates and suppresses items already independently answered during clarification.
+- Preserved same-device privacy handoffs: the first participant's selection, semantic value, text, and selection ID are omitted from the public response until every addressed participant answers.
+- Added deterministic outcomes for recorded alignment, a shared alternative that enters the immutable version-change flow, different meanings that reopen only one item, uncertainty, and deliberate unresolved continuation. New meaningful versions invalidate stale confirmations.
+- Bound separate confirmations to the participant's current understanding review and changed the `clarity-receipt-v2` completion data from teach-back status to understanding status. Receipts continue to preserve unresolved and not-discussed meaning and the required legal disclaimer.
+- Updated Live UI copy and interaction to one accessible choice question at a time, visible progress, one **Submit my choice** action, conditional free text, neutral handoff/outcome screens, and the five visible stages Conversation, Clarify, Check understanding, Confirm, and Receipt.
+- Updated setup, product, architecture, API, analysis, clarification, receipt, language, privacy, OpenAI, evaluation, and roadmap documentation. MeaningSync records independent selections and makes differences visible; it does not prove comprehension, identity, consent, or legal enforceability.
+- Documented how Codex supported architecture inspection, implementation, tests, and usability iteration while the builder retained the core product decisions; kept GPT-5.6 as the final hackathon agreement-analysis model.
+- Finalized the post-clarification policy: a current meaning with completed two-party clarification receives at most one additional Check understanding question, or proceeds directly to separate confirmation when none remains. Sessions without clarification retain the one/two/three-question policy.
+- Remaining limitations are same-device participation, process-local storage, no authentication or role-bound participant token, no QR joining or realtime synchronization, and English text only.
+
+Final verification results:
+
+- `ruff format --check .`: passed; 42 files formatted. `ruff check .`: passed.
+- `pytest`: 87 passed; 12 paid OpenAI evaluation cases skipped by default.
+- FastAPI import/OpenAPI generation: passed with 24 paths.
+- `npm run lint` and `npm run type-check`: passed.
+- `npm test -- --run`: 46 passed across 9 files.
+- `npm run build`: passed with Next.js 16.2.10 and all 8 application routes generated.
+- No browser automation or paid OpenAI request ran during this completion pass.

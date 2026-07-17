@@ -114,7 +114,7 @@ class ParticipantPosition(StrictModel):
 
 
 class EvidenceReference(StrictModel):
-    source: Literal["transcript", "clarification"]
+    source: Literal["transcript", "clarification", "understanding_check"]
     reference_id: str = Field(min_length=1, max_length=160)
     participant_id: Identifier
     role: PartyRole

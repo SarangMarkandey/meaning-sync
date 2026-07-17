@@ -21,8 +21,10 @@ from app.schemas.workflow import (
 
 app = FastAPI(
     title="MeaningSync API",
-    description="Deterministic demo and OpenAI-powered live agreement analysis.",
-    version="0.3.0",
+    description=(
+        "Deterministic demo and choice-based live agreement understanding checks."
+    ),
+    version="0.4.0",
 )
 
 app.add_middleware(

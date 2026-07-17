@@ -4,35 +4,34 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import get_settings
 from app.schemas.analysis import AnalysisErrorResponse
+from app.schemas.understanding import (
+    LeaveQuestionUnresolvedSubmission,
+    UnderstandingSelectionSubmission,
+)
 from app.schemas.workflow import (
     AdditionalStatementsSubmission,
     AgreementVersion,
     AnalyzeLiveSessionSubmission,
-    ClarificationAnswerSubmission,
     ConfirmationStatusView,
     ConfirmationSubmission,
     IssueReceiptSubmission,
-    LeaveClarificationUnresolvedSubmission,
     LiveClarityReceipt,
     LiveSessionCreate,
     LiveSessionView,
     NotApplicableProposalSubmission,
     OptionalDetailsReviewedSubmission,
-    StartReviewSubmission,
-    TeachbackSubmission,
+    StartUnderstandingCheckSubmission,
     WorkflowErrorDetail,
     WorkflowErrorResponse,
 )
 from app.services.analyzers import AnalysisFailure, OpenAIAgreementAnalyzer
 from app.services.live_sessions import LiveSessionService, WorkflowFailure
-from app.services.teachbacks import OpenAITeachbackEvaluator, TeachbackFailure
 
 router = APIRouter(prefix="/api/v1/live/sessions", tags=["live sessions"])
 
 _settings = get_settings()
 _service = LiveSessionService(
     analyzer=OpenAIAgreementAnalyzer(settings=_settings),
-    teachback_evaluator=OpenAITeachbackEvaluator(settings=_settings),
     clarification_attempt_limit=_settings.meaningsync_clarification_attempt_limit,
 )
 
@@ -68,8 +67,7 @@ def _workflow_error(exc: WorkflowFailure) -> HTTPException:
     )
 
 
-def _provider_error(exc: AnalysisFailure | TeachbackFailure) -> HTTPException:
-    # Both provider failures use the same intentionally small public shape.
+def _provider_error(exc: AnalysisFailure) -> HTTPException:
     return HTTPException(
         status_code=exc.status_code,
         detail={
@@ -147,41 +145,35 @@ def get_agreement_version(
 
 
 @router.post(
-    "/{session_id}/clarifications/{clarification_id}/answers",
+    "/{session_id}/questions/{question_id}/selections",
     response_model=LiveSessionView,
     responses=ERROR_RESPONSES,
 )
-async def submit_clarification_answer(
+def submit_understanding_selection(
     session_id: str,
-    clarification_id: str,
-    submission: ClarificationAnswerSubmission,
+    question_id: str,
+    submission: UnderstandingSelectionSubmission,
     service: Service,
 ) -> LiveSessionView:
     try:
-        return await service.submit_clarification_answer(
-            session_id, clarification_id, submission
-        )
+        return service.submit_selection(session_id, question_id, submission)
     except WorkflowFailure as exc:
         raise _workflow_error(exc) from exc
-    except AnalysisFailure as exc:
-        raise _provider_error(exc) from exc
 
 
 @router.post(
-    "/{session_id}/clarifications/{clarification_id}/leave-unresolved",
+    "/{session_id}/questions/{question_id}/leave-unresolved",
     response_model=LiveSessionView,
     responses=ERROR_RESPONSES,
 )
-def leave_clarification_unresolved(
+def leave_question_unresolved(
     session_id: str,
-    clarification_id: str,
-    submission: LeaveClarificationUnresolvedSubmission,
+    question_id: str,
+    submission: LeaveQuestionUnresolvedSubmission,
     service: Service,
 ) -> LiveSessionView:
     try:
-        return service.leave_clarification_unresolved(
-            session_id, clarification_id, submission
-        )
+        return service.leave_question_unresolved(session_id, question_id, submission)
     except WorkflowFailure as exc:
         raise _workflow_error(exc) from exc
 
@@ -237,33 +229,19 @@ def mark_optional_details_reviewed(
 
 
 @router.post(
-    "/{session_id}/review",
+    "/{session_id}/understanding-checks",
     response_model=LiveSessionView,
     responses=ERROR_RESPONSES,
 )
-def start_review(
-    session_id: str, submission: StartReviewSubmission, service: Service
+def start_understanding_check(
+    session_id: str,
+    submission: StartUnderstandingCheckSubmission,
+    service: Service,
 ) -> LiveSessionView:
     try:
-        return service.start_review(session_id, submission)
+        return service.start_understanding_check(session_id, submission)
     except WorkflowFailure as exc:
         raise _workflow_error(exc) from exc
-
-
-@router.post(
-    "/{session_id}/teachbacks",
-    response_model=LiveSessionView,
-    responses=ERROR_RESPONSES,
-)
-async def submit_teachback(
-    session_id: str, submission: TeachbackSubmission, service: Service
-) -> LiveSessionView:
-    try:
-        return await service.submit_teachback(session_id, submission)
-    except WorkflowFailure as exc:
-        raise _workflow_error(exc) from exc
-    except TeachbackFailure as exc:
-        raise _provider_error(exc) from exc
 
 
 @router.post(

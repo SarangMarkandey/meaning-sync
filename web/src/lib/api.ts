@@ -51,42 +51,55 @@ export type LiveSessionStage =
   | "conversation_draft"
   | "analyzing"
   | "needs_clarification"
-  | "ready_for_review"
-  | "awaiting_teachbacks"
+  | "ready_for_understanding_check"
+  | "awaiting_understanding_checks"
   | "awaiting_confirmations"
   | "confirmed"
   | "receipt_issued";
+export type UnderstandingQuestionKind = "clarification" | "understanding_check";
+export type UnderstandingOptionKind =
+  | "recorded_position"
+  | "recorded_meaning"
+  | "other"
+  | "unsure";
+export type UnderstandingQuestionStatus =
+  | "pending"
+  | "partially_answered"
+  | "completed"
+  | "needs_clarification"
+  | "unsure"
+  | "left_unresolved";
 export type ClarificationStatus =
   | "pending"
   | "answered"
   | "resolved"
   | "still_unresolved"
   | "left_unresolved";
+export type UnderstandingOutcomeState =
+  | "aligned"
+  | "meaning_changed"
+  | "different"
+  | "unsure"
+  | "left_unresolved";
 export type ParticipantReviewStatus =
   | "not_started"
-  | "reviewing"
-  | "teachback_submitted"
-  | "needs_clarification"
+  | "checking"
+  | "completed"
+  | "skipped"
   | "ready_to_confirm"
   | "confirmed";
-export type TeachbackComparisonState =
-  | "matches"
-  | "partially_matches"
-  | "contradicts"
-  | "insufficient";
 export type ReceiptStatus = "fully_aligned" | "contains_unresolved_items";
 export type LiveUserStage =
   | "conversation"
   | "clarify"
-  | "review"
+  | "check_understanding"
   | "confirm"
   | "receipt";
 export type LiveGuidanceAction =
-  | "answer_clarification"
+  | "submit_selection"
   | "leave_unresolved"
   | "review_optional_details"
-  | "review_final_understanding"
-  | "submit_teachback"
+  | "start_understanding_check"
   | "submit_confirmation"
   | "issue_receipt"
   | "view_receipt";
@@ -97,11 +110,14 @@ export type LiveErrorCode =
   | "clarification_target_missing"
   | "clarification_limit_reached"
   | "participant_mismatch"
-  | "teachback_incomplete"
-  | "teachback_mismatch"
   | "confirmation_missing"
   | "confirmation_version_mismatch"
   | "receipt_not_ready"
+  | "question_not_found"
+  | "invalid_option"
+  | "question_incomplete"
+  | "idempotency_conflict"
+  | "understanding_incomplete"
   | "session_not_found";
 export type SessionStage =
   | "created"
@@ -127,7 +143,7 @@ export interface TranscriptTurn {
 }
 
 export interface EvidenceReference {
-  source: "transcript" | "clarification";
+  source: "transcript" | "clarification" | "understanding_check";
   reference_id: string;
   participant_id: string;
   role: PartyRole;
@@ -284,51 +300,48 @@ export interface AgreementVersion {
   not_applicable_proposals: NotApplicableProposal[];
 }
 
-export interface LiveClarification {
+export interface UnderstandingOption {
   id: string;
-  target_item_key: string;
-  target_agreement_version_id: string;
-  question: string;
-  answer_options: string[];
-  fingerprint: string;
-  semantic_target: string;
-  addressed_participant_ids: PartyRole[];
-  answers_received_from: PartyRole[];
-  responses_revealed: boolean;
-  response_message_ids: Partial<Record<PartyRole, string>>;
-  status: ClarificationStatus;
-  created_at: string;
-  resolved_at: string | null;
-  resulting_agreement_version_id: string | null;
-  attempt_number: number;
+  label: string;
+  kind: UnderstandingOptionKind;
 }
 
-export interface TeachbackItemResult {
-  analysis_item_key: string;
-  state: TeachbackComparisonState;
-  agreement_summary: string;
-  feedback: string;
-}
-
-export interface LiveTeachback {
-  id: string;
+export interface UnderstandingOutcomePosition {
   participant_id: PartyRole;
+  option_id: string;
+  label: string;
+  other_text?: string | null;
+}
+
+export interface UnderstandingQuestionOutcome {
+  state: UnderstandingOutcomeState;
+  positions: UnderstandingOutcomePosition[];
+  resulting_agreement_version_id?: string | null;
+}
+
+export interface UnderstandingQuestion {
+  id: string;
+  session_id: string;
   agreement_version_id: string;
-  original_language: LanguageCode;
-  covered_item_keys: string[];
-  item_results: TeachbackItemResult[];
-  overall_state: TeachbackComparisonState;
-  missing_or_contradictory_summary: string | null;
-  follow_up_question: string | null;
-  acknowledged_unresolved_item_keys: string[];
-  created_at: string;
+  agreement_item_id: string;
+  kind: UnderstandingQuestionKind;
+  prompt: string;
+  options: UnderstandingOption[];
+  evidence_reference_ids: string[];
+  addressed_participant_ids: PartyRole[];
+  answered_participant_ids: PartyRole[];
+  responses_revealed: boolean;
+  status: UnderstandingQuestionStatus;
+  question_number: number;
+  question_count: number;
+  outcome?: UnderstandingQuestionOutcome | null;
 }
 
 export interface LiveConfirmation {
   id: string;
   participant_id: PartyRole;
   agreement_version_id: string;
-  teachback_id: string;
+  understanding_review_id: string;
   unresolved_item_acknowledgments: string[];
   confirmed_at: string;
   language: LanguageCode;
@@ -336,11 +349,14 @@ export interface LiveConfirmation {
   invalidated_at: string | null;
 }
 
-export interface ParticipantReview {
+export interface ParticipantUnderstandingReview {
+  id: string;
   participant_id: PartyRole;
-  status: ParticipantReviewStatus;
   agreement_version_id: string;
-  teachback_id: string | null;
+  status: ParticipantReviewStatus;
+  completed_question_ids: string[];
+  created_at: string;
+  completed_at?: string | null;
 }
 
 export interface AgreementVersionChange {
@@ -363,6 +379,7 @@ export interface LiveGuidance {
   required_issue_count: number;
   optional_missing_count: number;
   acting_participant: PartyRole | null;
+  active_question_id: string | null;
   active_clarification_id: string | null;
   target_item_key: string | null;
   required_item_keys: string[];
@@ -377,10 +394,11 @@ export interface LiveSessionView {
   messages: AnalysisMessage[];
   agreement_versions: AgreementVersion[];
   current_agreement_version_id: string | null;
-  clarifications: LiveClarification[];
-  teachbacks: LiveTeachback[];
+  questions: UnderstandingQuestion[];
   confirmations: LiveConfirmation[];
-  reviews: Partial<Record<PartyRole, ParticipantReview>>;
+  understanding_reviews: Partial<
+    Record<PartyRole, ParticipantUnderstandingReview>
+  >;
   active_participant_id: PartyRole | null;
   receipt_id: string | null;
   receipt_ready: boolean;
@@ -420,8 +438,10 @@ export interface ReceiptClarificationSummary {
   target_item_key: string;
   target_agreement_version_id: string;
   resulting_agreement_version_id: string | null;
-  response_message_ids: Partial<Record<PartyRole, string>>;
   status: ClarificationStatus;
+  response_message_ids: Partial<Record<PartyRole, string>>;
+  fingerprint: string;
+  semantic_target: string;
 }
 
 export interface NotApplicableProposal {
@@ -431,11 +451,12 @@ export interface NotApplicableProposal {
   proposed_by: PartyRole[];
 }
 
-export interface ReceiptTeachbackStatus {
+export interface ReceiptUnderstandingStatus {
   participant_id: PartyRole;
-  teachback_id: string;
-  result: TeachbackComparisonState;
+  review_id: string;
+  result: "completed" | "skipped";
   completed_at: string;
+  question_ids: string[];
 }
 
 export interface LiveClarityReceipt {
@@ -451,7 +472,7 @@ export interface LiveClarityReceipt {
   not_applicable_terms: NotApplicableProposal[];
   not_discussed_terms: AgreementTerm[];
   clarification_history: ReceiptClarificationSummary[];
-  teachback_status: ReceiptTeachbackStatus[];
+  understanding_status: ReceiptUnderstandingStatus[];
   confirmations: ReceiptConfirmation[];
   status: ReceiptStatus;
   application_version: string;
@@ -614,30 +635,32 @@ export const api = {
       method: "POST",
       body: JSON.stringify(submission),
     }),
-  submitLiveClarificationAnswer: (
+  submitUnderstandingSelection: (
     sessionId: string,
-    clarificationId: string,
+    questionId: string,
     submission: {
       participant_id: PartyRole;
-      answer: string;
+      option_id: string;
+      other_text?: string;
       expected_agreement_version_id: string;
       request_id: string;
     },
   ) =>
     request<LiveSessionView>(
-      `${liveSessionPath(sessionId)}/clarifications/${encodeURIComponent(clarificationId)}/answers`,
+      `${liveSessionPath(sessionId)}/questions/${encodeURIComponent(questionId)}/selections`,
       { method: "POST", body: JSON.stringify(submission) },
     ),
-  leaveLiveClarificationUnresolved: (
+  leaveLiveQuestionUnresolved: (
     sessionId: string,
-    clarificationId: string,
+    questionId: string,
     submission: {
       expected_agreement_version_id: string;
+      participant_id: PartyRole;
       request_id: string;
     },
   ) =>
     request<LiveSessionView>(
-      `${liveSessionPath(sessionId)}/clarifications/${encodeURIComponent(clarificationId)}/leave-unresolved`,
+      `${liveSessionPath(sessionId)}/questions/${encodeURIComponent(questionId)}/leave-unresolved`,
       { method: "POST", body: JSON.stringify(submission) },
     ),
   reviewOptionalDetails: (
@@ -651,27 +674,12 @@ export const api = {
       `${liveSessionPath(sessionId)}/optional-details/reviewed`,
       { method: "POST", body: JSON.stringify(submission) },
     ),
-  submitTeachback: (
-    sessionId: string,
-    submission: {
-      participant_id: PartyRole;
-      text: string;
-      original_language: LanguageCode;
-      expected_agreement_version_id: string;
-      acknowledged_unresolved_item_keys: string[];
-      request_id: string;
-    },
-  ) =>
-    request<LiveSessionView>(`${liveSessionPath(sessionId)}/teachbacks`, {
-      method: "POST",
-      body: JSON.stringify(submission),
-    }),
   submitLiveConfirmation: (
     sessionId: string,
     submission: {
       participant_id: PartyRole;
       expected_agreement_version_id: string;
-      teachback_id: string;
+      understanding_review_id: string;
       decision: "confirm" | "request_change";
       unresolved_item_acknowledgments: string[];
       change_item_key?: string;
@@ -686,7 +694,7 @@ export const api = {
     request<ConfirmationStatusView>(
       `${liveSessionPath(sessionId)}/confirmation-status`,
     ),
-  beginLiveReview: (
+  beginUnderstandingCheck: (
     sessionId: string,
     submission: {
       expected_agreement_version_id: string;
@@ -694,7 +702,7 @@ export const api = {
       request_id: string;
     },
   ) =>
-    request<LiveSessionView>(`${liveSessionPath(sessionId)}/review`, {
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/understanding-checks`, {
       method: "POST",
       body: JSON.stringify(submission),
     }),
