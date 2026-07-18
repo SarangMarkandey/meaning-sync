@@ -15,7 +15,8 @@ def demo_transcript(session_id: str) -> list[TranscriptTurn]:
         (
             PartyRole.WORKER,
             "Electrician",
-            "₹1,200 covers my labour. Replacement parts are separate.",
+            "I will repair the fan and two switches. ₹1,200 covers my labour. "
+            "Replacement parts are separate.",
         ),
         (PartyRole.HIRER, "Homeowner", "The work can start today."),
         (PartyRole.WORKER, "Electrician", "Yes, I can start today."),

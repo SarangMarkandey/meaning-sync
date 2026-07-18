@@ -35,7 +35,7 @@ describe("DemoSetup", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Start Demo/ }));
     expect(push).toHaveBeenCalledWith(
-      "/demo?hirer_language=en&worker_language=en",
+      "/demo?hirer_language=en&worker_language=en&currency=INR",
     );
   });
 

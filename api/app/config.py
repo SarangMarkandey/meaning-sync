@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     meaningsync_clarification_attempt_limit: int = Field(default=3, ge=1, le=10)
     meaningsync_database_url: str = "sqlite:///./meaningsync-local.db"
     meaningsync_session_ttl_hours: int = Field(default=24, ge=1, le=720)
+    meaningsync_access_token_ttl_hours: int = Field(default=24, ge=1, le=720)
+    meaningsync_invite_ttl_minutes: int = Field(default=15, ge=1, le=1440)
 
     @field_validator("openai_store_responses")
     @classmethod

@@ -1,5 +1,11 @@
 # API Contract
 
+## Live Access Contract
+
+P1B adds opaque bearer credentials without changing the Demo contract. A credential authorizes one role in one session; creator-controlled lifecycle actions use the session’s `creator_role`, which may be Customer (`hirer`) or Service provider (`worker`). The opposite role receives the high-entropy, expiring, single-use invitation.
+
+The first private selection remains absent from participant-scoped JSON until all addressed people answer. Polling clients compare the numeric `revision` or `ETag` and retain their current view when it is unchanged.
+
 All implemented endpoints are JSON under `/api/v1`. `GET /health` returns service status.
 
 ## Standalone Agreement Analysis
@@ -31,9 +37,9 @@ HTTP 502 is reserved for invalid core model output or evidence. Errors use a con
 
 ## Server-Owned Live Sessions
 
-The complete product flow uses `/api/v1/live/sessions`, not browser-owned state. Its repository-backed state survives backend restart until configured expiry. It supports session creation/reload, initial analysis, immutable agreement-version listing/retrieval, choice-based clarification, additional statements, not-applicable proposals, server-selected understanding questions, private participant selections, separate version-bound confirmations, confirmation status, and clarity-receipt issue/retrieval. The complete route and body reference is in [Live Session API](api.md).
+The complete product flow uses `/api/v1/live/sessions`, not browser-owned state. Its repository-backed state survives backend restart until configured expiry. It supports preferences and creator role, shared/separate participation, role-scoped messages/readiness, explicit creator analysis, immutable agreement versions, private choices, Conversation re-entry, separate version-bound confirmations, and receipt issue/retrieval. The complete route and body reference is in [Live Session API](api.md).
 
-Every `LiveSessionView` includes a `guidance` object. It gives the browser the five-stage `user_stage` (`conversation`, `clarify`, `check_understanding`, `confirm`, or `receipt`), plain-language headline/explanation, primary and optional secondary action/label, required and optional counts/item keys, acting participant, active question, and exact target item key. Setup is outside the stage list; the lower-level `analyzing` lifecycle value maps to a transient status within the move out of Conversation. Clients render guidance instead of deriving the next action from old clarification records or term-array order.
+Every `LiveSessionView` includes lifecycle state, creator/viewer roles, currency, readiness, active participant/question/item, agreement data, confirmations, and compatibility guidance. One frontend mapping presents exactly Preferences, Participation, Conversation, Check understanding, Confirm, and Receipt. `analyzing` is loading at the start of Check understanding; clarification is an interaction inside that step.
 
 Every applicable write includes `expected_agreement_version_id`; a stale write returns HTTP 409 and the current ID. Mutation bodies also carry `request_id` for idempotent retries, and their payload digests remain effective after restart. Each database mutation also uses an internal optimistic repository revision; a concurrent update returns `concurrent_update` without partial state. `POST /{session_id}/questions/{question_id}/selections` accepts the acting `participant_id`, backend-owned `option_id`, optional `other_text`, request ID, and expected version. The backend validates the session, participant, question, item, version, and option together. A pending selection is persisted but not returned to the browser until every addressed participant has answered; for a two-person question, the first remains hidden before the second submits. A successful meaning change creates a child snapshot rather than replacing v1. Any newer agreement version invalidates old confirmations.
 
@@ -41,7 +47,7 @@ Agreement snapshots expose internal `version_number`, user-facing `meaningful_ve
 
 Guidance classifies conflicting and critical one-sided items as required; they must be answered or explicitly left unresolved. Optional not-discussed items are returned separately and may be submitted together through the existing multi-message statement operation. A unilateral not-applicable proposal remains visible and does not count as shared meaning.
 
-`UnderstandingQuestion` unifies `clarification` and `understanding_check` kinds. Its public `UnderstandingOption` values expose stable IDs and labels with `recorded_position`, `recorded_meaning`, `other`, or `unsure` kinds; semantic values remain server-owned. Check understanding uses deterministic backend construction and outcome rules. A current meaning with completed two-party clarification receives at most one additional high-impact question; without clarification, simple agreements normally receive one or two and broad agreements receive at most three. Completed clarification evidence suppresses the same semantic question. Outcomes are `aligned`, `meaning_changed`, `different`, `unsure`, or `left_unresolved`: matching recorded meaning completes a check; matching alternative meaning enters the immutable version-change flow; different meanings return only the affected item to clarification; `other` requires 2–280 characters of text; and `unsure` cannot create alignment. Receipt readiness requires all applicable current-version checks to be complete or deliberately left unresolved, followed by both current confirmations. Confirmations bind `understanding_review_id`, and receipts expose `understanding_status`. These records show independent selections, not proven comprehension or consent.
+`UnderstandingQuestion` retains compatibility kinds while the current product opens choices only for conflict/one-sided decision items. Options use stable server-owned meanings. Compatible answers may create a child version; different answers remain unresolved and suppress immediate repetition. `other` requires 2–280 characters and `unsure` cannot align. There is no mandatory teach-back or minimum question count. Receipt readiness requires two confirmations of the same current version. These records show stated selections, not proven comprehension or consent.
 
 ## Deterministic Demo Sessions
 
@@ -59,4 +65,4 @@ All paths above are relative to `/api/v1/demo/sessions`. First clarification ans
 
 ## Status
 
-Implemented: standalone analysis, server-owned durable Live workflow, deterministic Demo routes, restart-recoverable Live receipts, expiry, and optimistic concurrency. Partially implemented: `hi` exists in shared language models but Live requests reject it; the interface remains same-device and database persistence is not authentication. Planned for P1B: role-bound tokens, single-use invite exchange, QR joining, participant-specific authorization, and lightweight synchronization. Audio and translation remain later work. MeaningSync does not provide legal advice, and its clarity receipt is not a legal contract.
+Implemented: standalone analysis, server-owned durable Live workflow, deterministic Demo routes, restart-recoverable Live receipts, expiry, optimistic concurrency, shared-device participation, and P1B separate-device joining with role-bound bearer credentials, single-use invitations, local QR rendering, and revision-aware polling. `hi` exists in shared language models but Live requests reject it. P1B authorization distinguishes possession of a role credential; it does not verify identity. Audio and translation remain later work. MeaningSync does not provide legal advice, and its clarity receipt is not a legal contract.

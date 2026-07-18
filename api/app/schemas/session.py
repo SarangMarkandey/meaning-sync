@@ -12,6 +12,7 @@ from app.schemas.analysis import (
     PartyRole,
     SessionMode,
 )
+from app.schemas.workflow import CurrencyCode
 
 
 class ConsentStatus(StrEnum):
@@ -45,6 +46,7 @@ class DemoSessionCreate(BaseModel):
     participant_languages: ParticipantLanguages = Field(
         default_factory=ParticipantLanguages
     )
+    currency: CurrencyCode = CurrencyCode.INR
 
 
 class SessionParticipant(BaseModel):
@@ -90,6 +92,7 @@ class ClarityReceipt(BaseModel):
     terms: list[AgreementTerm]
     confirmations: list[PartyConfirmation]
     completed_at: datetime
+    currency: CurrencyCode = CurrencyCode.INR
 
 
 class ConsentSubmission(BaseModel):
@@ -121,6 +124,7 @@ class SessionView(BaseModel):
     mode: SessionMode
     stage: SessionStage
     created_at: datetime
+    currency: CurrencyCode = CurrencyCode.INR
     participants: list[SessionParticipant]
     consent: dict[PartyRole, ConsentStatus]
     transcript: list[TranscriptTurn]

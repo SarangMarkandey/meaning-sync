@@ -10,13 +10,9 @@ import {
   MeaningSyncApiError,
   type AgreementTerm,
   type LiveClarityReceipt,
-  type PartyRole,
 } from "@/lib/api";
-
-const roleNames: Record<PartyRole, string> = {
-  hirer: "Homeowner",
-  worker: "Electrician",
-};
+import { roleLabel } from "@/lib/flow-presentation";
+import { getAnyLiveAccess } from "@/lib/live-access";
 
 const languageNames = { en: "English", hi: "Hindi" } as const;
 const understandingStatusNames = {
@@ -33,7 +29,12 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
     setLoading(true);
     setError(null);
     try {
-      setReceipt(await api.getLiveReceipt(sessionId));
+      setReceipt(
+        await api.getLiveReceipt(
+          sessionId,
+          getAnyLiveAccess(sessionId)?.token ?? "",
+        ),
+      );
     } catch (caught) {
       setError(
         caught instanceof MeaningSyncApiError
@@ -48,7 +49,7 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     let current = true;
     void api
-      .getLiveReceipt(sessionId)
+      .getLiveReceipt(sessionId, getAnyLiveAccess(sessionId)?.token ?? "")
       .then((next) => {
         if (!current) return;
         setReceipt(next);
@@ -87,7 +88,7 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
         <section className="session-recovery" role="alert">
           <span>{early ? "Receipt not ready" : "Receipt unavailable"}</span>
           <h1>{early ? "Both participants must confirm first." : "We could not open this receipt."}</h1>
-          <p>{early ? "Return to the session to finish each person’s understanding check and separate confirmation." : error?.message}</p>
+          <p>{early ? "Return to the session to finish open decisions and each person’s separate confirmation." : error?.message}</p>
           <div>
             <Link className="button secondary" href={`/live/${encodeURIComponent(sessionId)}`}>Return to session</Link>
             {!early && <button className="button primary" type="button" onClick={() => void loadReceipt()}>Try again</button>}
@@ -133,7 +134,9 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
 
           <section className="receipt-meta" aria-label="Receipt summary">
             <div><span>Status</span><strong>{hasOpenPoints ? "Some points remain unresolved" : "All recorded meanings match"}</strong></div>
-            <div><span>Participants</span><strong>{receipt.participants.map((participant) => participant.display_name || roleNames[participant.role]).join(" and ")}</strong></div>
+            <div><span>Participants</span><strong>{receipt.participants.map((participant) => roleLabel(participant.role)).join(" and ")}</strong></div>
+            <div><span>Session currency</span><strong>{receipt.currency}</strong></div>
+            <div><span>Session started</span><strong>{receipt.session_created_at ? new Date(receipt.session_created_at).toLocaleString() : "Not recorded"}</strong></div>
             <div><span>Receipt ID</span><strong>{receipt.id}</strong></div>
           </section>
 
@@ -151,13 +154,13 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
 
           {(notDiscussed.length > 0 || receipt.not_applicable_terms.length > 0) && (
             <details className="receipt-section receipt-not-discussed">
-              <summary><span>Optional details</span><strong>Not discussed or proposed not applicable</strong></summary>
+              <summary><span>Not discussed</span><strong>Open details and not-applicable proposals</strong></summary>
               <GuidedTermList terms={notDiscussed} />
               {receipt.not_applicable_terms.length > 0 && (
                 <div className="not-applicable-list">
                   <strong>Proposed not applicable</strong>
                   {receipt.not_applicable_terms.map((proposal) => (
-                    <p key={proposal.item_key}><strong>{proposal.label}</strong> — {proposal.summary} Marked by {proposal.proposed_by.map((party) => roleNames[party]).join(" and ")}.</p>
+                    <p key={proposal.item_key}><strong>{proposal.label}</strong> — {proposal.summary} Marked by {proposal.proposed_by.map((party) => roleLabel(party)).join(" and ")}.</p>
                   ))}
                 </div>
               )}
@@ -169,8 +172,8 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
             <div>
               {receipt.confirmations.map((confirmation) => (
                 <article key={confirmation.participant_id}>
-                  <span className={`avatar small ${confirmation.participant_id === "worker" ? "worker" : ""}`}>{roleNames[confirmation.participant_id][0]}</span>
-                  <p><strong>{roleNames[confirmation.participant_id]}</strong><span>Confirmed {new Date(confirmation.confirmed_at).toLocaleString()}</span></p>
+                  <span className={`avatar small ${confirmation.participant_id === "worker" ? "worker" : ""}`}>{roleLabel(confirmation.participant_id)[0]}</span>
+                  <p><strong>{roleLabel(confirmation.participant_id)}</strong><span>Confirmed {new Date(confirmation.confirmed_at).toLocaleString()}</span></p>
                   <i aria-label="Confirmed">✓</i>
                 </article>
               ))}
@@ -190,22 +193,28 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
               <p>The hash can detect a change to this server-generated snapshot. It is not a digital signature and does not prove identity.</p>
               <section>
                 <h2>Languages used</h2>
-                <ul>{receipt.participants.map((participant) => <li key={participant.participant_id}>{roleNames[participant.role]} — {languageNames[participant.language]}</li>)}</ul>
+                <ul>{receipt.participants.map((participant) => <li key={participant.participant_id}>{roleLabel(participant.role)} — {languageNames[participant.language]}</li>)}</ul>
               </section>
               <section>
-                <h2>Understanding checks</h2>
-                <ul>{receipt.understanding_status.map((item) => <li key={item.review_id}>{roleNames[item.participant_id]} — {understandingStatusNames[item.result]}</li>)}</ul>
+                <h2>Review status</h2>
+                <ul>{receipt.understanding_status.map((item) => <li key={item.review_id}>{roleLabel(item.participant_id)} — {understandingStatusNames[item.result]}</li>)}</ul>
               </section>
               {receipt.clarification_history.length > 0 && (
                 <section>
-                  <h2>Clarification history</h2>
+                  <h2>Decision history</h2>
                   <ul>{receipt.clarification_history.map((item) => <li key={item.clarification_id}>{termLabel(item.target_item_key)} — {item.status.replaceAll("_", " ")}</li>)}</ul>
+                </section>
+              )}
+              {receipt.agreement_history.length > 0 && (
+                <section>
+                  <h2>Changes over time</h2>
+                  <ul>{receipt.agreement_history.map((item, index) => <li key={`${item.item_key}-${index}`}>{item.label} — {item.resulting_meaning}</li>)}</ul>
                 </section>
               )}
               {receipt.not_applicable_terms.length > 0 && (
                 <section>
                   <h2>Not-applicable review</h2>
-                  <ul>{receipt.not_applicable_terms.map((proposal) => <li key={proposal.item_key}>{proposal.label} — {proposal.summary} Marked by {proposal.proposed_by.map((party) => roleNames[party]).join(" and ")}.</li>)}</ul>
+                  <ul>{receipt.not_applicable_terms.map((proposal) => <li key={proposal.item_key}>{proposal.label} — {proposal.summary} Marked by {proposal.proposed_by.map((party) => roleLabel(party)).join(" and ")}.</li>)}</ul>
                 </section>
               )}
             </div>

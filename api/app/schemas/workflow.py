@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import ConfigDict, Field, model_validator
 
@@ -44,6 +45,17 @@ class LiveSessionStage(StrEnum):
     RECEIPT_ISSUED = "receipt_issued"
 
 
+class LiveParticipationMode(StrEnum):
+    SAME_DEVICE = "same_device"
+    SEPARATE_DEVICES = "separate_devices"
+
+
+class CurrencyCode(StrEnum):
+    INR = "INR"
+    USD = "USD"
+    EUR = "EUR"
+
+
 class ClarificationWorkflowStatus(StrEnum):
     PENDING = "pending"
     ANSWERED = "answered"
@@ -53,6 +65,8 @@ class ClarificationWorkflowStatus(StrEnum):
 
 
 class LiveUserStage(StrEnum):
+    PREFERENCES = "preferences"
+    PARTICIPATION = "participation"
     CONVERSATION = "conversation"
     CLARIFY = "clarify"
     CHECK_UNDERSTANDING = "check_understanding"
@@ -108,6 +122,15 @@ class WorkflowErrorCode(StrEnum):
     CONFIRMATION_MISSING = "confirmation_missing"
     CONFIRMATION_VERSION_MISMATCH = "confirmation_version_mismatch"
     RECEIPT_NOT_READY = "receipt_not_ready"
+    ACCESS_REQUIRED = "access_required"
+    ACCESS_INVALID = "access_invalid"
+    ACCESS_EXPIRED = "access_expired"
+    ACCESS_REVOKED = "access_revoked"
+    ROLE_FORBIDDEN = "role_forbidden"
+    INVITATION_INVALID = "invitation_invalid"
+    INVITATION_EXPIRED = "invitation_expired"
+    INVITATION_USED = "invitation_used"
+    INVITATION_REVOKED = "invitation_revoked"
 
 
 class WorkflowErrorDetail(StrictModel):
@@ -123,7 +146,57 @@ class WorkflowErrorResponse(StrictModel):
 
 class LiveSessionCreate(StrictModel):
     participants: list[AnalysisParticipant] = Field(min_length=2, max_length=2)
-    messages: list[AnalysisMessage] = Field(min_length=2, max_length=40)
+    messages: list[AnalysisMessage] = Field(default_factory=list, max_length=40)
+    participation_mode: LiveParticipationMode = LiveParticipationMode.SAME_DEVICE
+    currency: CurrencyCode = CurrencyCode.INR
+    creator_role: PartyRole = PartyRole.HIRER
+
+    @model_validator(mode="after")
+    def validate_initial_messages(self) -> LiveSessionCreate:
+        if len(self.messages) == 1:
+            raise ValueError("initial messages must be empty or include both people")
+        return self
+
+
+class LiveAccessCredential(StrictModel):
+    role: PartyRole
+    access_token: str = Field(min_length=32, max_length=200)
+    expires_at: datetime
+
+
+class LiveInvitation(StrictModel):
+    role: PartyRole
+    invitation: str = Field(min_length=32, max_length=200)
+    expires_at: datetime
+
+
+class LiveInvitationExchange(StrictModel):
+    invitation: str = Field(min_length=32, max_length=200)
+    privacy_notice_accepted: bool
+
+    @model_validator(mode="after")
+    def require_notice(self) -> LiveInvitationExchange:
+        if not self.privacy_notice_accepted:
+            raise ValueError("the privacy notice must be accepted")
+        return self
+
+
+class LiveInvitationExchangeResult(StrictModel):
+    session_id: Identifier
+    role: PartyRole
+    access_token: str = Field(min_length=32, max_length=200)
+    expires_at: datetime
+
+
+class LiveInvitationResult(StrictModel):
+    session_id: Identifier
+    invitation: LiveInvitation
+
+
+class ParticipantPresence(StrictModel):
+    role: PartyRole
+    status: Literal["waiting", "connected", "offline"]
+    last_seen_at: datetime | None = None
 
 
 class AgreementVersionChange(FrozenWorkflowModel):
@@ -244,6 +317,8 @@ class LiveClarityReceipt(FrozenWorkflowModel):
     agreement_version_id: Identifier
     agreement_version_number: int = Field(ge=1)
     issued_at: datetime
+    session_created_at: datetime | None = None
+    currency: CurrencyCode = CurrencyCode.INR
     participants: list[ReceiptParticipant] = Field(min_length=2, max_length=2)
     aligned_terms: list[AgreementTerm]
     unresolved_terms: list[AgreementTerm]
@@ -251,6 +326,7 @@ class LiveClarityReceipt(FrozenWorkflowModel):
     not_applicable_terms: list[NotApplicableProposal]
     not_discussed_terms: list[AgreementTerm]
     clarification_history: list[ClarificationHistoryEntry]
+    agreement_history: list[AgreementVersionChange] = Field(default_factory=list)
     understanding_status: list[ReceiptUnderstandingStatus] = Field(
         min_length=2, max_length=2
     )
@@ -289,7 +365,15 @@ class LiveSessionView(StrictModel):
     stage: LiveSessionStage
     created_at: datetime
     participants: list[AnalysisParticipant] = Field(min_length=2, max_length=2)
-    messages: list[AnalysisMessage] = Field(min_length=2, max_length=80)
+    messages: list[AnalysisMessage] = Field(default_factory=list, max_length=80)
+    revision: int = Field(default=0, ge=0)
+    participation_mode: LiveParticipationMode = LiveParticipationMode.SAME_DEVICE
+    currency: CurrencyCode = CurrencyCode.INR
+    creator_role: PartyRole = PartyRole.HIRER
+    participant_readiness: dict[PartyRole, bool] = Field(default_factory=dict)
+    conversation_reentry_item_key: Identifier | None = None
+    viewer_role: PartyRole | None = None
+    participant_presence: list[ParticipantPresence] = Field(default_factory=list)
     agreement_versions: list[AgreementVersion] = Field(default_factory=list)
     current_agreement_version_id: Identifier | None = None
     questions: list[UnderstandingQuestion] = Field(default_factory=list)
@@ -313,6 +397,27 @@ class LiveSessionView(StrictModel):
             ),
             None,
         )
+
+
+class LiveSessionCreateResult(LiveSessionView):
+    access_credentials: list[LiveAccessCredential] = Field(min_length=1, max_length=2)
+    invitation: LiveInvitation | None = None
+
+
+class DraftStatementSubmission(StrictModel):
+    original_text: str = Field(min_length=2, max_length=2000)
+    request_id: Identifier
+
+
+class ParticipantReadinessSubmission(StrictModel):
+    ready: bool
+    request_id: Identifier
+
+
+class ConversationReentrySubmission(StrictModel):
+    expected_agreement_version_id: Identifier
+    item_key: Identifier | None = None
+    request_id: Identifier
 
 
 class ConfirmationStatusView(StrictModel):

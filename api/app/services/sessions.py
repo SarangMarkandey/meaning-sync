@@ -32,6 +32,7 @@ from app.schemas.session import (
     SessionView,
     TranscriptTurn,
 )
+from app.schemas.workflow import CurrencyCode
 from app.services.analyzers import AgreementAnalyzer, DeterministicAgreementAnalyzer
 from app.services.analyzers.validation import ROLE_NAMES
 from app.services.translation import TranslationService, with_optional_translation
@@ -53,6 +54,7 @@ class SessionRecord:
     mode: SessionMode
     stage: SessionStage
     created_at: datetime
+    currency: CurrencyCode
     participants: list[SessionParticipant]
     consent: dict[PartyRole, ConsentStatus]
     transcript: list[TranscriptTurn]
@@ -81,7 +83,9 @@ class SessionService:
             self._sessions.clear()
 
     def create_demo(
-        self, participant_languages: ParticipantLanguages | None = None
+        self,
+        participant_languages: ParticipantLanguages | None = None,
+        currency: CurrencyCode = CurrencyCode.INR,
     ) -> SessionView:
         languages = participant_languages or ParticipantLanguages()
         session_id = str(uuid4())
@@ -116,6 +120,7 @@ class SessionService:
             mode=SessionMode.DEMO,
             stage=SessionStage.CREATED,
             created_at=datetime.now(UTC),
+            currency=currency,
             participants=participants,
             consent={role: ConsentStatus.PENDING for role in PartyRole},
             transcript=transcript,
@@ -245,6 +250,7 @@ class SessionService:
                 terms=record.terms,
                 confirmations=list(record.confirmations.values()),
                 completed_at=datetime.now(UTC),
+                currency=record.currency,
             )
             return record.receipt
 
@@ -388,6 +394,7 @@ class SessionService:
             mode=record.mode,
             stage=record.stage,
             created_at=record.created_at,
+            currency=record.currency,
             participants=record.participants,
             consent=record.consent,
             transcript=record.transcript,

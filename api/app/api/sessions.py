@@ -19,7 +19,8 @@ async def create_demo_session(
     submission: DemoSessionCreate | None = None,
 ) -> SessionView:
     languages = submission.participant_languages if submission else None
-    return session_service.create_demo(languages)
+    currency = submission.currency if submission else None
+    return session_service.create_demo(languages, currency or "INR")
 
 
 @router.get("/{session_id}", response_model=SessionView)

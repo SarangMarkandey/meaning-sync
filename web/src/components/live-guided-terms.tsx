@@ -4,11 +4,7 @@ import type {
   NotApplicableProposal,
   PartyRole,
 } from "@/lib/api";
-
-const roleNames: Record<PartyRole, string> = {
-  hirer: "Homeowner",
-  worker: "Electrician",
-};
+import { roleLabel } from "@/lib/flow-presentation";
 
 const stateLabels: Record<MeaningState, string> = {
   aligned: "Both said the same thing",
@@ -25,7 +21,7 @@ export function EvidenceDisclosure({ term }: { term: AgreementTerm }) {
       <ul>
         {term.evidence.map((reference) => (
           <li key={`${reference.source}-${reference.reference_id}`}>
-            <span>{reference.speaker_name || roleNames[reference.role]}</span>
+            <span>{roleLabel(reference.role)}</span>
             <q>{reference.original_text}</q>
           </li>
         ))}
@@ -91,7 +87,7 @@ function NotApplicableNote({
 }) {
   const both = proposal.proposed_by.length === 2;
   const proposers = proposal.proposed_by
-    .map((party) => roleNames[party])
+    .map((party) => roleLabel(party))
     .join(" and ");
   const waitingFor = (["hirer", "worker"] as PartyRole[]).find(
     (party) => !proposal.proposed_by.includes(party),
@@ -103,7 +99,7 @@ function NotApplicableNote({
       <span>
         {both
           ? `${proposers} both marked this not applicable.`
-          : `${proposers} marked this not applicable. It is still pending for ${waitingFor ? roleNames[waitingFor] : "the other person"}.`}
+          : `${proposers} marked this not applicable. It is still pending for ${waitingFor ? roleLabel(waitingFor) : "the other person"}.`}
       </span>
     </div>
   );
@@ -115,7 +111,7 @@ export function ParticipantPositions({ term }: { term: AgreementTerm }) {
     <div className="guided-positions">
       {term.participant_positions.map((position) => (
         <div key={position.participant_id}>
-          <span>{roleNames[position.role]}</span>
+          <span>{roleLabel(position.role)}</span>
           <p>{position.summary}</p>
         </div>
       ))}

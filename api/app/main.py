@@ -7,10 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from app.api.analysis import router as analysis_router
+from app.api.live_sessions import invitation_router
 from app.api.live_sessions import router as live_sessions_router
 from app.api.sessions import router as sessions_router
 from app.config import cors_origins, get_settings
-from app.repositories import SqlLiveSessionRepository
+from app.repositories import SqlLiveAccessRepository, SqlLiveSessionRepository
 from app.schemas.analysis import (
     AnalysisErrorCode,
     AnalysisErrorDetail,
@@ -22,6 +23,7 @@ from app.schemas.workflow import (
     WorkflowErrorResponse,
 )
 from app.services.analyzers import OpenAIAgreementAnalyzer
+from app.services.live_access import LiveAccessService
 from app.services.live_sessions import LiveSessionService
 
 
@@ -33,16 +35,25 @@ async def lifespan(application: FastAPI):
         ttl_hours=settings.meaningsync_session_ttl_hours,
     )
     repository.validate()
+    access_repository = SqlLiveAccessRepository(settings.meaningsync_database_url)
+    access_repository.validate()
     application.state.live_session_service = LiveSessionService(
         analyzer=OpenAIAgreementAnalyzer(settings=settings),
         repository=repository,
         clarification_attempt_limit=settings.meaningsync_clarification_attempt_limit,
     )
     application.state.live_session_repository = repository
+    application.state.live_access_service = LiveAccessService(
+        access_repository,
+        access_ttl_hours=settings.meaningsync_access_token_ttl_hours,
+        invite_ttl_minutes=settings.meaningsync_invite_ttl_minutes,
+    )
+    application.state.live_access_repository = access_repository
     try:
         yield
     finally:
         repository.close()
+        access_repository.close()
 
 
 app = FastAPI(
@@ -59,11 +70,12 @@ app.add_middleware(
     allow_origins=cors_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 app.include_router(sessions_router)
 app.include_router(analysis_router)
 app.include_router(live_sessions_router)
+app.include_router(invitation_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -79,7 +91,9 @@ async def controlled_request_validation(
             )
         )
         return JSONResponse(status_code=422, content=problem.model_dump(mode="json"))
-    if request.url.path.startswith("/api/v1/live/sessions"):
+    if request.url.path.startswith(
+        ("/api/v1/live/sessions", "/api/v1/live/invitations")
+    ):
         problem = WorkflowErrorResponse(
             detail=WorkflowErrorDetail(
                 code=WorkflowErrorCode.INVALID_REQUEST,

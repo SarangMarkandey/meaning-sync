@@ -13,11 +13,17 @@ describe("DemoExperience", () => {
       .mockImplementation(() => new Promise(() => undefined));
 
     render(
-      <DemoExperience participantLanguages={{ hirer: "en", worker: "en" }} />,
+      <DemoExperience
+        participantLanguages={{ hirer: "en", worker: "en" }}
+        currency="INR"
+      />,
     );
 
     await waitFor(() =>
-      expect(createDemo).toHaveBeenCalledWith({ hirer: "en", worker: "en" }),
+      expect(createDemo).toHaveBeenCalledWith(
+        { hirer: "en", worker: "en" },
+        "INR",
+      ),
     );
   });
 });

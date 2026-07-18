@@ -56,6 +56,8 @@ export type LiveSessionStage =
   | "awaiting_confirmations"
   | "confirmed"
   | "receipt_issued";
+export type LiveParticipationMode = "same_device" | "separate_devices";
+export type CurrencyCode = "INR" | "USD" | "EUR";
 export type UnderstandingQuestionKind = "clarification" | "understanding_check";
 export type UnderstandingOptionKind =
   | "recorded_position"
@@ -90,6 +92,8 @@ export type ParticipantReviewStatus =
   | "confirmed";
 export type ReceiptStatus = "fully_aligned" | "contains_unresolved_items";
 export type LiveUserStage =
+  | "preferences"
+  | "participation"
   | "conversation"
   | "clarify"
   | "check_understanding"
@@ -118,7 +122,19 @@ export type LiveErrorCode =
   | "question_incomplete"
   | "idempotency_conflict"
   | "understanding_incomplete"
-  | "session_not_found";
+  | "session_not_found"
+  | "session_expired"
+  | "concurrent_update"
+  | "stored_state_invalid"
+  | "access_required"
+  | "access_invalid"
+  | "access_expired"
+  | "access_revoked"
+  | "role_forbidden"
+  | "invitation_invalid"
+  | "invitation_expired"
+  | "invitation_used"
+  | "invitation_revoked";
 export type SessionStage =
   | "created"
   | "consent_pending"
@@ -216,6 +232,7 @@ export interface SessionView {
   mode: SessionMode;
   stage: SessionStage;
   created_at: string;
+  currency: CurrencyCode;
   participants: SessionParticipant[];
   consent: Record<PartyRole, ConsentStatus>;
   transcript: TranscriptTurn[];
@@ -239,6 +256,7 @@ export interface ClarityReceipt {
   terms: AgreementTerm[];
   confirmations: PartyConfirmation[];
   completed_at: string;
+  currency: CurrencyCode;
 }
 
 export interface AnalysisParticipant {
@@ -392,6 +410,18 @@ export interface LiveSessionView {
   created_at: string;
   participants: SessionParticipant[];
   messages: AnalysisMessage[];
+  revision?: number;
+  participation_mode?: LiveParticipationMode;
+  currency: CurrencyCode;
+  creator_role: PartyRole;
+  participant_readiness: Record<PartyRole, boolean>;
+  conversation_reentry_item_key: string | null;
+  viewer_role?: PartyRole | null;
+  participant_presence?: Array<{
+    role: PartyRole;
+    status: "waiting" | "connected" | "offline";
+    last_seen_at: string | null;
+  }>;
   agreement_versions: AgreementVersion[];
   current_agreement_version_id: string | null;
   questions: UnderstandingQuestion[];
@@ -417,6 +447,26 @@ export interface ConfirmationStatusView {
 export interface LiveSessionCreate {
   participants: [AnalysisParticipant, AnalysisParticipant];
   messages: AnalysisMessage[];
+  participation_mode: LiveParticipationMode;
+  currency: CurrencyCode;
+  creator_role: PartyRole;
+}
+
+export interface LiveAccessCredential {
+  role: PartyRole;
+  access_token: string;
+  expires_at: string;
+}
+
+export interface LiveInvitation {
+  role: PartyRole;
+  invitation: string;
+  expires_at: string;
+}
+
+export interface LiveSessionCreateResult extends LiveSessionView {
+  access_credentials: LiveAccessCredential[];
+  invitation: LiveInvitation | null;
 }
 
 export interface ReceiptParticipant {
@@ -465,6 +515,8 @@ export interface LiveClarityReceipt {
   agreement_version_id: string;
   agreement_version_number: number;
   issued_at: string;
+  session_created_at: string | null;
+  currency: CurrencyCode;
   participants: ReceiptParticipant[];
   aligned_terms: AgreementTerm[];
   unresolved_terms: AgreementTerm[];
@@ -472,6 +524,7 @@ export interface LiveClarityReceipt {
   not_applicable_terms: NotApplicableProposal[];
   not_discussed_terms: AgreementTerm[];
   clarification_history: ReceiptClarificationSummary[];
+  agreement_history: AgreementVersionChange[];
   understanding_status: ReceiptUnderstandingStatus[];
   confirmations: ReceiptConfirmation[];
   status: ReceiptStatus;
@@ -537,6 +590,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+const authorized = (accessToken: string): HeadersInit => ({
+  Authorization: `Bearer ${accessToken}`,
+});
+
 const sessionPath = (sessionId: string) =>
   `/api/v1/demo/sessions/${sessionId}`;
 const liveSessionPath = (sessionId: string) =>
@@ -548,10 +605,14 @@ export const api = {
       hirer: "en",
       worker: "en",
     },
+    currency: CurrencyCode = "INR",
   ) =>
     request<SessionView>("/api/v1/demo/sessions", {
       method: "POST",
-      body: JSON.stringify({ participant_languages: participantLanguages }),
+      body: JSON.stringify({
+        participant_languages: participantLanguages,
+        currency,
+      }),
     }),
   submitConsent: (sessionId: string, party: PartyRole, accepted = true) =>
     request<SessionView>(`${sessionPath(sessionId)}/consent`, {
@@ -591,24 +652,35 @@ export const api = {
       body: JSON.stringify(submission),
     }),
   createLiveSession: (submission: LiveSessionCreate) =>
-    request<LiveSessionView>("/api/v1/live/sessions", {
+    request<LiveSessionCreateResult>("/api/v1/live/sessions", {
       method: "POST",
       body: JSON.stringify(submission),
     }),
-  getLiveSession: (sessionId: string) =>
-    request<LiveSessionView>(liveSessionPath(sessionId)),
-  analyzeLiveSession: (sessionId: string) =>
+  getLiveSession: (sessionId: string, accessToken: string) =>
+    request<LiveSessionView>(liveSessionPath(sessionId), {
+      headers: authorized(accessToken),
+    }),
+  analyzeLiveSession: (
+    sessionId: string,
+    expectedAgreementVersionId: string | null,
+    accessToken: string,
+  ) =>
     request<LiveSessionView>(`${liveSessionPath(sessionId)}/analysis`, {
       method: "POST",
-      body: JSON.stringify({ expected_agreement_version_id: null }),
+      headers: authorized(accessToken),
+      body: JSON.stringify({
+        expected_agreement_version_id: expectedAgreementVersionId,
+      }),
     }),
-  listAgreementVersions: (sessionId: string) =>
+  listAgreementVersions: (sessionId: string, accessToken: string) =>
     request<AgreementVersion[]>(
       `${liveSessionPath(sessionId)}/agreement-versions`,
+      { headers: authorized(accessToken) },
     ),
-  getAgreementVersion: (sessionId: string, versionId: string) =>
+  getAgreementVersion: (sessionId: string, versionId: string, accessToken: string) =>
     request<AgreementVersion>(
       `${liveSessionPath(sessionId)}/agreement-versions/${encodeURIComponent(versionId)}`,
+      { headers: authorized(accessToken) },
     ),
   addLiveStatements: (
     sessionId: string,
@@ -617,9 +689,11 @@ export const api = {
       messages: AnalysisMessage[];
       request_id: string;
     },
+    accessToken: string,
   ) =>
     request<LiveSessionView>(`${liveSessionPath(sessionId)}/statements`, {
       method: "POST",
+      headers: authorized(accessToken),
       body: JSON.stringify(submission),
     }),
   proposeNotApplicable: (
@@ -630,9 +704,11 @@ export const api = {
       item_key: string;
       request_id: string;
     },
+    accessToken: string,
   ) =>
     request<LiveSessionView>(`${liveSessionPath(sessionId)}/not-applicable`, {
       method: "POST",
+      headers: authorized(accessToken),
       body: JSON.stringify(submission),
     }),
   submitUnderstandingSelection: (
@@ -645,10 +721,11 @@ export const api = {
       expected_agreement_version_id: string;
       request_id: string;
     },
+    accessToken: string,
   ) =>
     request<LiveSessionView>(
       `${liveSessionPath(sessionId)}/questions/${encodeURIComponent(questionId)}/selections`,
-      { method: "POST", body: JSON.stringify(submission) },
+      { method: "POST", headers: authorized(accessToken), body: JSON.stringify(submission) },
     ),
   leaveLiveQuestionUnresolved: (
     sessionId: string,
@@ -658,10 +735,11 @@ export const api = {
       participant_id: PartyRole;
       request_id: string;
     },
+    accessToken: string,
   ) =>
     request<LiveSessionView>(
       `${liveSessionPath(sessionId)}/questions/${encodeURIComponent(questionId)}/leave-unresolved`,
-      { method: "POST", body: JSON.stringify(submission) },
+      { method: "POST", headers: authorized(accessToken), body: JSON.stringify(submission) },
     ),
   reviewOptionalDetails: (
     sessionId: string,
@@ -669,10 +747,11 @@ export const api = {
       expected_agreement_version_id: string;
       request_id: string;
     },
+    accessToken: string,
   ) =>
     request<LiveSessionView>(
       `${liveSessionPath(sessionId)}/optional-details/reviewed`,
-      { method: "POST", body: JSON.stringify(submission) },
+      { method: "POST", headers: authorized(accessToken), body: JSON.stringify(submission) },
     ),
   submitLiveConfirmation: (
     sessionId: string,
@@ -685,14 +764,17 @@ export const api = {
       change_item_key?: string;
       request_id: string;
     },
+    accessToken: string,
   ) =>
     request<LiveSessionView>(`${liveSessionPath(sessionId)}/confirmations`, {
       method: "POST",
+      headers: authorized(accessToken),
       body: JSON.stringify(submission),
     }),
-  getLiveConfirmationStatus: (sessionId: string) =>
+  getLiveConfirmationStatus: (sessionId: string, accessToken: string) =>
     request<ConfirmationStatusView>(
       `${liveSessionPath(sessionId)}/confirmation-status`,
+      { headers: authorized(accessToken) },
     ),
   beginUnderstandingCheck: (
     sessionId: string,
@@ -701,23 +783,83 @@ export const api = {
       acknowledged_unresolved_item_keys: string[];
       request_id: string;
     },
+    accessToken: string,
   ) =>
     request<LiveSessionView>(`${liveSessionPath(sessionId)}/understanding-checks`, {
       method: "POST",
+      headers: authorized(accessToken),
       body: JSON.stringify(submission),
     }),
   issueLiveReceipt: (
     sessionId: string,
     expectedAgreementVersionId: string,
     requestId: string,
+    accessToken: string,
   ) =>
     request<LiveClarityReceipt>(`${liveSessionPath(sessionId)}/receipt`, {
       method: "POST",
+      headers: authorized(accessToken),
       body: JSON.stringify({
         expected_agreement_version_id: expectedAgreementVersionId,
         request_id: requestId,
       }),
     }),
-  getLiveReceipt: (sessionId: string) =>
-    request<LiveClarityReceipt>(`${liveSessionPath(sessionId)}/receipt`),
+  getLiveReceipt: (sessionId: string, accessToken: string) =>
+    request<LiveClarityReceipt>(`${liveSessionPath(sessionId)}/receipt`, {
+      headers: authorized(accessToken),
+    }),
+  addDraftStatement: (
+    sessionId: string,
+    originalText: string,
+    requestId: string,
+    accessToken: string,
+  ) =>
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/draft-statements`, {
+      method: "POST",
+      headers: authorized(accessToken),
+      body: JSON.stringify({ original_text: originalText, request_id: requestId }),
+    }),
+  setLiveReadiness: (
+    sessionId: string,
+    ready: boolean,
+    requestId: string,
+    accessToken: string,
+  ) =>
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/readiness`, {
+      method: "POST",
+      headers: authorized(accessToken),
+      body: JSON.stringify({ ready, request_id: requestId }),
+    }),
+  reenterLiveConversation: (
+    sessionId: string,
+    expectedAgreementVersionId: string,
+    itemKey: string | null,
+    requestId: string,
+    accessToken: string,
+  ) =>
+    request<LiveSessionView>(
+      `${liveSessionPath(sessionId)}/conversation/reentry`,
+      {
+        method: "POST",
+        headers: authorized(accessToken),
+        body: JSON.stringify({
+          expected_agreement_version_id: expectedAgreementVersionId,
+          item_key: itemKey,
+          request_id: requestId,
+        }),
+      },
+    ),
+  exchangeLiveInvitation: (invitation: string) =>
+    request<{ session_id: string; role: PartyRole; access_token: string; expires_at: string }>(
+      "/api/v1/live/invitations/exchange",
+      {
+        method: "POST",
+        body: JSON.stringify({ invitation, privacy_notice_accepted: true }),
+      },
+    ),
+  regenerateLiveInvitation: (sessionId: string, accessToken: string) =>
+    request<{ session_id: string; invitation: LiveInvitation }>(
+      `${liveSessionPath(sessionId)}/invitations/regenerate`,
+      { method: "POST", headers: authorized(accessToken) },
+    ),
 };

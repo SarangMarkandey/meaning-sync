@@ -177,6 +177,10 @@ export function guidedV5Session(
       { message_id: "scope-worker", speaker_id: "worker", original_text: "I will repair the fan and two switches.", original_language: "en", order: 1, timestamp },
       { message_id: "price-hirer", speaker_id: "hirer", original_text: "The labour price is ₹1,200 and parts need my approval.", original_language: "en", order: 2, timestamp },
     ],
+    currency: "INR",
+    creator_role: "hirer",
+    participant_readiness: { hirer: false, worker: false },
+    conversation_reentry_item_key: null,
     agreement_versions: [
       {
         id: "version-5",

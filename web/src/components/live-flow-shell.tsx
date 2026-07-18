@@ -1,28 +1,25 @@
 import Link from "next/link";
 
-import type { LiveUserStage } from "@/lib/api";
-
-const stages: Array<{ id: LiveUserStage; label: string }> = [
-  { id: "conversation", label: "Conversation" },
-  { id: "clarify", label: "Clarify" },
-  { id: "check_understanding", label: "Check understanding" },
-  { id: "confirm", label: "Confirm" },
-  { id: "receipt", label: "Receipt" },
-];
+import {
+  type VisibleFlowStage,
+  visibleFlowSteps,
+} from "@/lib/flow-presentation";
 
 export function LiveProgress({
   currentStage,
   explanation,
 }: {
-  currentStage: LiveUserStage;
+  currentStage: VisibleFlowStage;
   explanation: string;
 }) {
-  const currentIndex = stages.findIndex((stage) => stage.id === currentStage);
+  const currentIndex = visibleFlowSteps.findIndex(
+    (stage) => stage.id === currentStage,
+  );
 
   return (
     <div className="guided-progress-wrap">
       <nav className="guided-progress" aria-label="Live session progress">
-        {stages.map((stage, index) => {
+        {visibleFlowSteps.map((stage, index) => {
           const complete = index < currentIndex;
           const current = index === currentIndex;
           return (
