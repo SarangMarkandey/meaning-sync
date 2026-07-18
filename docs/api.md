@@ -1,12 +1,26 @@
 # Live Session API
 
+## P1B Authorization and Joining
+
+Every Live endpoint except creation and invitation exchange requires `Authorization: Bearer <role-access-token>`. Missing or invalid credentials return `401`; a valid credential used for another session or participant role returns `403`; stale agreement writes retain the existing `409` contract.
+
+- `POST /api/v1/live/sessions` accepts `participation_mode`, `creator_role`, `currency`, and independent participant languages. Shared-device creation returns both role credentials; separate-device creation returns the creator credential and one invitation for the opposite role.
+- `POST /api/v1/live/invitations/exchange` atomically exchanges the one-time invitation for the invited role credential.
+- `POST /api/v1/live/sessions/{id}/invitations/regenerate` replaces a pending invitation.
+- `POST /api/v1/live/sessions/{id}/participants/{role}/revoke` lets the creator revoke the opposite role’s access.
+- `POST /api/v1/live/sessions/{id}/draft-statements` appends a server-owned message for the bearer role before analysis.
+- `POST /api/v1/live/sessions/{id}/readiness` records the bearer role’s readiness; both roles must be ready before comparison.
+- `POST /api/v1/live/sessions/{id}/conversation/reentry` returns an item to Conversation and invalidates readiness/review/confirmation state.
+
+Session views include `revision`, `participation_mode`, `viewer_role`, and participant presence. `GET` also returns the revision as `ETag`. Secrets never belong in query parameters or ordinary session views.
+
 All operations are JSON under `/api/v1/live/sessions`. FastAPI owns lifecycle state, the active participant, version order, and receipt readiness. `GET /health` remains the service health check. `POST /api/v1/agreements/analyze` remains the standalone analysis contract, but the product workflow uses session endpoints.
 
 ## Session and Analysis
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/live/sessions` | Create an English Live session from exactly one `hirer`, one `worker`, and 2–40 ordered messages. |
+| `POST` | `/api/v1/live/sessions` | Create an English Live session with Customer/Service provider domain roles and an initially empty conversation. |
 | `GET` | `/api/v1/live/sessions/{session_id}` | Reload the authoritative durable session view after refresh or backend restart. |
 | `POST` | `/api/v1/live/sessions/{session_id}/analysis` | Analyze the draft and create Agreement Map v1. Body: `expected_agreement_version_id` (initially `null`). |
 | `GET` | `/api/v1/live/sessions/{session_id}/agreement-versions` | List immutable snapshots in version order. |
@@ -14,15 +28,11 @@ All operations are JSON under `/api/v1/live/sessions`. FastAPI owns lifecycle st
 
 An `AgreementVersion` contains its ID and increasing internal number, user-facing `meaningful_version_number`, `has_meaningful_change`, deterministic `semantic_fingerprint`, parent and session IDs, creation time, source message IDs, full `terms`, unresolved item keys, not-applicable proposals, prompt/model/schema metadata, analysis status/warnings, exact primary clarification, and per-item changes. Internal order records every validated analysis; the meaningful number changes only when normalized agreement meaning changes.
 
-Every session response also contains `guidance`:
+Every session response also contains compatibility `guidance`, plus `creator_role`, `currency`, `participant_readiness`, and an optional conversation-reentry item. The client maps server lifecycle centrally to exactly:
 
-- `user_stage`: `conversation`, `clarify`, `check_understanding`, `confirm`, or `receipt`;
-- plain-language `headline`, `explanation`, and primary/secondary labels;
-- typed actions rather than client-inferred navigation;
-- `acting_participant`, active question ID, and exact target item key;
-- required/optional item keys and their counts.
+`Preferences → Participation → Conversation → Check understanding → Confirm → Receipt`
 
-The server orders required issues by scope, amount and price coverage, materials, timing, payment, then other critical responsibility. Guidance actions include `submit_selection`, `leave_unresolved`, `review_optional_details`, `start_understanding_check`, `submit_confirmation`, `issue_receipt`, and `view_receipt`. Setup is not a user stage, and `analyzing` is a transient lifecycle status rather than a clickable progress destination.
+`analyzing` maps to a loading state at the start of Check understanding. Lower-level clarification/check lifecycle values also map there; they do not add progress steps.
 
 ## Clarification and Check Understanding
 
@@ -30,10 +40,10 @@ The server orders required issues by scope, amount and price coverage, materials
 | --- | --- | --- |
 | `POST` | `/{session_id}/questions/{question_id}/selections` | `expected_agreement_version_id`, acting `participant_id`, backend-owned `option_id`, optional `other_text`, `request_id` |
 | `POST` | `/{session_id}/questions/{question_id}/leave-unresolved` | expected version, acting `participant_id`, and `request_id`; explicitly retain the exact issue as unresolved |
-| `POST` | `/{session_id}/statements` | expected version, new chronological `messages`, `request_id` |
+| `POST` | `/{session_id}/statements` | Legacy batch append: expected version, chronological `messages`, `request_id`; returns to Conversation and does not analyze. |
 | `POST` | `/{session_id}/not-applicable` | expected version, participant, exact `item_key`, `request_id` |
 | `POST` | `/{session_id}/optional-details/reviewed` | expected version and `request_id`; finish the optional batch without changing missing terms |
-| `POST` | `/{session_id}/understanding-checks` | expected version, complete `acknowledged_unresolved_item_keys`, `request_id`; create zero to three high-impact checks |
+| `POST` | `/{session_id}/understanding-checks` | Begin confirmation after decision items are resolved or explicitly left open; no mandatory teach-back questions are created. |
 
 Paths in this and later tables are relative to `/api/v1/live/sessions`. `UnderstandingQuestion` is shared by `clarification` and `understanding_check` kinds. It binds the session, immutable version, stable agreement item, semantic commitment, evidence IDs, addressed participants, question number/count, three or four options, status, and eventual outcome. Each public `UnderstandingOption` exposes a stable ID, neutral label, and kind: `recorded_position`, `recorded_meaning`, `other`, or `unsure`. Its semantic value remains backend-owned and is never accepted from the browser.
 
@@ -41,9 +51,9 @@ The former Live clarification-answer, review, and teach-back routes are retired 
 
 The backend validates an option against the exact question, participant, session, item, and agreement version. `other_text` is rejected unless the `other` option is selected and requires 2–280 characters when it is selected. The first pending `ParticipantSelection` is stored internally but is absent from the public question/session response. Only after all addressed participants submit does the question expose the neutral outcome: `aligned`, `meaning_changed`, `different`, `unsure`, or `left_unresolved`.
 
-Questions are deduplicated by stable item ID and semantic commitment. The service also records independent evidence from the conversation, completed clarification, completed understanding checks, and confirmation. A completed clarification item is not asked again; when current meaning includes a completed two-party clarification, the server creates at most one additional material check and may create none. Without clarification, simple agreements normally receive one or two checks and broad agreements receive at most three. Untouched optional missing topics are excluded.
+Questions are deduplicated by stable item ID and semantic commitment. The service also records independent evidence from the conversation, completed choices, and confirmation. Compatible selections may create a child version. Different selections remain unresolved and are not immediately asked again; clients offer Conversation re-entry or an explicit unresolved outcome. Untouched optional missing topics are excluded from required decisions.
 
-`POST /statements` accepts multiple chronological messages, allowing users to discuss several optional details in one deliberate batch and incur at most one resulting re-analysis. Marking optional details reviewed records workflow progress only; it does not add evidence or convert a missing term to alignment. Matching recorded meaning completes a question; matching alternative meaning enters the immutable version-change flow; different meaning reopens only that item; `unsure` cannot align; and both participants may explicitly leave the item unresolved.
+`POST /statements` accepts multiple chronological messages but never analyzes them; the creator must explicitly call `/analysis` after both people are ready. Marking optional details reviewed records workflow progress only; it does not add evidence or convert a missing term to alignment. Matching recorded meaning completes a question; matching alternative meaning enters the immutable version-change flow; `unsure` cannot align; and both participants may explicitly leave the item unresolved.
 
 ## Confirmation
 
@@ -52,16 +62,16 @@ Questions are deduplicated by stable item ID and semantic commitment. The servic
 | `POST` | `/{session_id}/confirmations` | expected version, participant, own `understanding_review_id`, `decision`, unresolved acknowledgments, optional exact `change_item_key`, `request_id` |
 | `GET` | `/{session_id}/confirmation-status` | Returns each current confirmation and whether a receipt is ready. |
 
-A `confirm` decision requires that participant’s current-version understanding review, including every applicable selection or a valid server-recorded skip. `request_change` requires an exact item and returns the session to clarification. Duplicate request IDs and duplicate current confirmations are idempotent. A selection and confirmation record what the participant chose; neither proves comprehension, identity, or consent.
+A `confirm` decision binds that participant to the current version and acknowledged open items. `request_change` requires an exact item and returns the session to Conversation. New messages, re-entry, or a new version invalidate current confirmations. Duplicate request IDs and duplicate current confirmations are idempotent. A selection and confirmation record what the participant chose; neither proves comprehension, identity, or consent.
 
 ## Clarity Receipt
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/{session_id}/receipt` | Issue once applicable understanding checks and both current confirmations are complete. Body: expected version and `request_id`. |
+| `POST` | `/{session_id}/receipt` | Issue after both participants confirm the same current version. Body: expected version and `request_id`. |
 | `GET` | `/{session_id}/receipt` | Retrieve the immutable durable snapshot; returns `receipt_not_ready` before issuance. |
 
-The `clarity-receipt-v2` snapshot separates aligned, conflicting/unresolved, one-sided, not-applicable, and not-discussed entries; retains evidence and clarification history; records `understanding_status` and both confirmation timestamps; and reports `fully_aligned` or `contains_unresolved_items`.
+The immutable receipt separates aligned, conflicting/unresolved, one-sided, not-applicable, and not-discussed entries; retains evidence and agreement history; records roles, languages, session currency, session/confirmation timestamps, original evidence currency, and an integrity hash; and reports `fully_aligned` or `contains_unresolved_items`.
 
 ## Errors and Concurrency
 

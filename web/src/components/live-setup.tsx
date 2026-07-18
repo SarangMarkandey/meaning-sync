@@ -4,95 +4,221 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-import type { LanguageCode, PartyRole } from "@/lib/api";
+import { LiveBrandBar, LiveProgress } from "@/components/live-flow-shell";
+import {
+  api,
+  MeaningSyncApiError,
+  type CurrencyCode,
+  type LanguageCode,
+  type LiveParticipationMode,
+  type PartyRole,
+} from "@/lib/api";
+import { otherRole, roleLabel } from "@/lib/flow-presentation";
+import { storeLiveAccess } from "@/lib/live-access";
+import { useScrollToTop } from "@/lib/use-scroll-to-top";
 
-const participants: Array<{ role: PartyRole; title: string; label: string }> = [
-  { role: "hirer", title: "Participant 1", label: "Homeowner" },
-  { role: "worker", title: "Participant 2", label: "Electrician" },
-];
+const roles: PartyRole[] = ["hirer", "worker"];
 
 export function LiveSetup() {
   const router = useRouter();
+  const [step, setStep] = useState<"preferences" | "participation">(
+    "preferences",
+  );
   const [languages, setLanguages] = useState<Record<PartyRole, LanguageCode>>({
     hirer: "en",
     worker: "en",
   });
+  const [currency, setCurrency] = useState<CurrencyCode>("INR");
+  const [creatorRole, setCreatorRole] = useState<PartyRole>("hirer");
+  const [participationMode, setParticipationMode] =
+    useState<LiveParticipationMode>("same_device");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const supported = languages.hirer === "en" && languages.worker === "en";
 
-  const continueToConversation = (event: FormEvent<HTMLFormElement>) => {
+  useScrollToTop(`live-setup:${step}`);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supported) return;
-    const query = new URLSearchParams({
-      hirer_language: languages.hirer,
-      worker_language: languages.worker,
-    });
-    router.push(`/live?${query.toString()}`);
+    if (step === "preferences") {
+      setStep("participation");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const session = await api.createLiveSession({
+        participants: [
+          { id: "hirer", role: "hirer", language: languages.hirer },
+          { id: "worker", role: "worker", language: languages.worker },
+        ],
+        messages: [],
+        participation_mode: participationMode,
+        currency,
+        creator_role: creatorRole,
+      });
+      storeLiveAccess(session.id, session.access_credentials);
+      if (participationMode === "separate_devices") {
+        if (!session.invitation) {
+          throw new MeaningSyncApiError(
+            "A joining invitation could not be created.",
+          );
+        }
+        const fragment = new URLSearchParams({
+          invite: session.invitation.invitation,
+          expires: session.invitation.expires_at,
+          role: session.invitation.role,
+        });
+        router.push(
+          `/live/${encodeURIComponent(session.id)}/waiting#${fragment.toString()}`,
+        );
+      } else {
+        router.push(`/live/${encodeURIComponent(session.id)}`);
+      }
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The Live session could not be created.",
+      );
+      setLoading(false);
+    }
   };
 
   return (
     <main className="app-shell">
-      <nav className="topbar">
-        <Link className="brand" href="/">
-          <span className="brand-mark">M</span>
-          <span>MeaningSync</span>
-        </Link>
-      </nav>
-      <section className="setup-page">
+      <LiveBrandBar trailing={<span className="guided-mode-note">Live · text only</span>} />
+      <section className="setup-page conversation-setup">
+        <LiveProgress
+          currentStage={step}
+          explanation={
+            step === "preferences"
+              ? "Choose how each person reads the conversation."
+              : "Choose who is creating the session and how both people will join."
+          }
+        />
         <header className="flow-heading">
-          <span>Live conversation</span>
-          <h1>Choose each person’s language</h1>
-          <p>Each person can use the language they are most comfortable with.</p>
+          <span>{step === "preferences" ? "Preferences" : "Participation"}</span>
+          <h1>
+            {step === "preferences"
+              ? "Set up the conversation"
+              : "Who are you?"}
+          </h1>
+          <p>
+            {step === "preferences"
+              ? "Original wording and currencies stay unchanged in the evidence."
+              : "The other person will take the opposite role in this session."}
+          </p>
         </header>
 
-        <div className="preview-notice" role="note">
-          <strong>Text only in this milestone</strong>
-          <span>No microphone, audio recording, or live transcription is used.</span>
-        </div>
-
-        <form onSubmit={continueToConversation}>
-          <div className="setup-grid">
-            {participants.map((participant) => (
-              <article className="setup-card" key={participant.role}>
-                <div className="setup-participant">
-                  <span>{participant.title}</span>
-                  <h2>{participant.label}</h2>
-                </div>
-                <label htmlFor={`live-${participant.role}-language`}>
-                  Language
-                </label>
+        <form onSubmit={submit}>
+          {step === "preferences" ? (
+            <>
+              <div className="setup-grid">
+                {roles.map((role) => (
+                  <article className="setup-card" key={role}>
+                    <div className="setup-participant">
+                      <span>{role === "hirer" ? "Participant 1" : "Participant 2"}</span>
+                      <h2>{roleLabel(role)}</h2>
+                    </div>
+                    <label htmlFor={`live-${role}-language`}>Language</label>
+                    <select
+                      id={`live-${role}-language`}
+                      value={languages[role]}
+                      onChange={(event) =>
+                        setLanguages((current) => ({
+                          ...current,
+                          [role]: event.target.value as LanguageCode,
+                        }))
+                      }
+                    >
+                      <option value="en">English</option>
+                      <option value="hi" disabled>Hindi — Coming soon</option>
+                    </select>
+                  </article>
+                ))}
+              </div>
+              <label className="setup-currency" htmlFor="live-currency">
+                Session currency
                 <select
-                  id={`live-${participant.role}-language`}
-                  value={languages[participant.role]}
+                  id="live-currency"
+                  value={currency}
                   onChange={(event) =>
-                    setLanguages((current) => ({
-                      ...current,
-                      [participant.role]: event.target.value as LanguageCode,
-                    }))
+                    setCurrency(event.target.value as CurrencyCode)
                   }
                 >
-                  <option value="en">English</option>
-                  <option value="hi" disabled>
-                    Hindi — Coming soon
-                  </option>
+                  <option value="INR">INR — Indian rupee</option>
+                  <option value="USD">USD — US dollar</option>
+                  <option value="EUR">EUR — Euro</option>
                 </select>
-              </article>
-            ))}
-          </div>
+                <small>No currency conversion is performed.</small>
+              </label>
+            </>
+          ) : (
+            <>
+              <fieldset className="live-role-picker">
+                <legend>Choose your role</legend>
+                {roles.map((role) => (
+                  <label key={role}>
+                    <input
+                      type="radio"
+                      name="creator-role"
+                      value={role}
+                      checked={creatorRole === role}
+                      onChange={() => setCreatorRole(role)}
+                    />
+                    <span><strong>I am the {roleLabel(role)}</strong></span>
+                  </label>
+                ))}
+              </fieldset>
+              <fieldset className="live-mode-picker">
+                <legend>How will you take part?</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="participation-mode"
+                    value="same_device"
+                    checked={participationMode === "same_device"}
+                    onChange={() => setParticipationMode("same_device")}
+                  />
+                  <span>
+                    <strong>Share this device</strong>
+                    <small>Pass this screen between both people.</small>
+                  </span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="participation-mode"
+                    value="separate_devices"
+                    checked={participationMode === "separate_devices"}
+                    onChange={() => setParticipationMode("separate_devices")}
+                  />
+                  <span>
+                    <strong>Use separate devices</strong>
+                    <small>Invite the {roleLabel(otherRole(creatorRole)).toLowerCase()} with a private link.</small>
+                  </span>
+                </label>
+              </fieldset>
+            </>
+          )}
 
-          <div className="setup-status" role="status">
-            <span>Selected conversation</span>
-            <strong>English ↔ English</strong>
-          </div>
-          <p className="setup-availability">
-            Hindi and mixed-language conversations are coming later.
-          </p>
-
+          {error ? <p className="analysis-error" role="alert">{error}</p> : null}
           <div className="setup-actions">
-            <Link className="button secondary" href="/">
-              Back to home
-            </Link>
-            <button className="button primary" type="submit" disabled={!supported}>
-              Continue <span>→</span>
+            {step === "preferences" ? (
+              <Link className="button secondary" href="/">Back to home</Link>
+            ) : (
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => setStep("preferences")}
+              >
+                Back
+              </button>
+            )}
+            <button className="button primary" type="submit" disabled={!supported || loading}>
+              {loading ? "Creating session…" : step === "preferences" ? "Continue" : "Start conversation"} <span>→</span>
             </button>
           </div>
         </form>

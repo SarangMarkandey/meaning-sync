@@ -249,3 +249,66 @@ Final verification results:
 - A fresh SQLite database upgraded to Alembic revision `20260717_01`; a separate two-repository/two-service restart smoke test recovered the created session.
 - `npm run lint`, `npm run type-check`, `npm test -- --run`, and `npm run build`: passed; 46 frontend tests passed across 9 files and Next.js 16.2.10 generated all 8 routes.
 - No browser automation, Docker requirement, paid test, or OpenAI request ran.
+
+## P1B — Secure Separate-Device QR Joining
+
+**Date:** 2026-07-17
+
+- Added shared- and separate-device Live setup while preserving the existing guided shared-device handoff.
+- Added 256-bit session/role credentials and single-use worker invitations. FastAPI stores only SHA-256 hashes in dedicated SQL tables, enforces expiry/revocation, atomically allows one invitation exchange, and distinguishes missing `401`, forbidden `403`, and stale-version `409` failures.
+- Added Alembic revision `20260717_02`, restart-safe access/invitation repositories, participant-scoped session reads, own-role mutations, presence, and role-aware draft collection.
+- Added local QR rendering, URL-fragment cleanup, explicit recording/data notice acceptance, `sessionStorage` credentials, friendly invalid/expired/used states, invite regeneration, and revision-aware non-overlapping polling.
+- Added responsive waiting, join, connected, and separate-device conversation states. Real-browser testing found and fixed presence updates being discarded when only presence—not the workflow revision—changed.
+- Updated setup, API, architecture, data model, privacy, product, roadmap, demo, manual-test, language, analysis, clarification, receipt, evaluation, OpenAI, and local Ubuntu/LAN configuration documentation.
+
+Final verification results:
+
+- Ruff formatting and lint passed across 53 Python files.
+- Backend tests passed in bounded groups: 103 passed and 12 paid OpenAI evaluation cases skipped by default.
+- Fresh SQLite upgraded through Alembic `20260717_02`; required session, access, and invitation tables were present. FastAPI import/OpenAPI generation passed with 28 paths.
+- ESLint and TypeScript passed. Vitest passed 54 tests across 12 files. Next.js 16.2.10 production build passed with 9 generated routes, including `/live/join` and `/live/[sessionId]/waiting`.
+- Chrome 150 exercised setup at 1440×900, 1024×768, and 390×844; QR waiting/connected at tablet size; notice, joined, reused-link, and role-scoped conversation states at mobile and wide sizes. There was no horizontal overflow or clipped control in the checked states, and visual inspection found no layout regression.
+- The browser completed creation, explicit notice acceptance, single-use exchange, cross-device presence, and both role-scoped draft submissions without refresh. It did not click **Check understanding**, so no OpenAI request ran.
+- `git diff --check` passed. No commit or push was performed.
+
+Remaining limitations: English text only; possession of a role credential is not identity verification; polling replaces realtime transport; no accounts, audio, automatic cleanup, user-facing deletion, WebSockets, electronic signatures, or legal-contract status.
+
+## Conversation-First Live and Demo Flow
+
+**Date:** 2026-07-18
+
+- Replaced the technical workflow presentation with exactly six visible steps: Preferences, Participation, Conversation, Check understanding, Confirm, and Receipt. One shared frontend mapping translates every durable server lifecycle stage.
+- Added independent participant language preferences, INR/USD/EUR Live session currency metadata, creator-selectable Customer/Service provider roles, shared/separate participation, and opposite-role invitations. Demo remains the deterministic English/INR Homeowner/Electrician scenario.
+- Replaced form-like Live draft entry with role-scoped chat, per-role readiness, and creator-only explicit comparison after both people have spoken and are ready. New messages clear readiness/reviews/confirmations, and no message endpoint calls OpenAI.
+- Reworked Check understanding into Matches, Needs a decision, and Not discussed. Non-missing terms retain evidence; matching items require no action; private choices hide the first response; different choices do not repeat automatically; missing topics remain optional; no mandatory teach-back is created.
+- Added focused Conversation re-entry, immutable re-analysis versions, compact separate confirmations, and receipts containing roles, languages, session/evidence currency provenance, session/confirmation times, agreement history, unresolved/missing terms, disclaimer, and integrity hash.
+- Preserved durable SQL state, P1B bearer/invitation security, single-use QR joining, polling/presence, idempotency, optimistic concurrency, expiry, Demo determinism, and backend-only OpenAI access. Stored state now uses `state-v3` with v1/v2 compatibility defaults.
+- Updated README and all affected product, architecture, API, data, privacy, language, analysis, OpenAI, decision, receipt, evaluation, roadmap, demo, and manual-test documentation.
+
+Final verification results:
+
+- `ruff check .` and `ruff format --check .`: passed across 53 Python files after Ruff corrected two test import-order findings.
+- `pytest`: 91 passed; 12 opt-in paid OpenAI evaluation cases skipped.
+- Fresh SQLite migration: passed through Alembic revision `20260717_02`. FastAPI OpenAPI generation passed with 30 paths and 31 operations.
+- `npm run lint` and `npm run type-check`: passed.
+- `npm test -- --run`: 37 passed across 12 files.
+- `npm run build`: passed with Next.js 16.2.10 and all 9 application routes generated.
+- Production-browser verification covered 10 representative Demo/Live states at 1440×900, 1024×768, and 390×844 (30 viewport checks). All six steps remained visible; no horizontal overflow, clipping, hydration/React exception, or unexpected console error was found.
+- A separate two-profile browser audit created a Service-provider-owned session, exchanged a single-use Customer invitation, verified the three-step waiting guidance and one-action join at desktop/tablet/mobile widths, and confirmed both devices automatically entered the same Conversation route.
+- No paid OpenAI request was made. No commit or push was performed.
+
+## Flow Scroll Reset
+
+**Date:** 2026-07-19
+
+- Added one shared viewport-reset hook for state-driven Demo and Live screens, where React previously preserved the middle-of-page scroll position because the URL did not change.
+- Added a root route reset for navigation between setup, waiting, join, session, receipt, and start-over routes.
+- Bound resets to meaningful transitions only: Demo screens/private handoffs, Live setup steps, Live workflow stages/private handoffs, and join states. Polling, message entry, readiness updates, and ordinary rerenders do not unexpectedly move the viewport.
+- Added focused regression coverage for resetting to the document top on a changed transition key and preserving scroll on same-screen rerenders.
+
+Verification:
+
+- `npm run lint`: passed.
+- `npm run type-check`: passed.
+- `npm test -- --run`: 39 passed across 13 files.
+- `npm run build`: passed with Next.js 16.2.10 and all 9 routes generated.

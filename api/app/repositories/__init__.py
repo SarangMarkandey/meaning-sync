@@ -1,3 +1,16 @@
+from app.repositories.live_access import (
+    AccessExpired,
+    AccessNotFound,
+    AccessRevoked,
+    InMemoryLiveAccessRepository,
+    InvitationExpired,
+    InvitationNotFound,
+    InvitationRevoked,
+    InvitationUsed,
+    LiveAccessRepository,
+    SqlLiveAccessRepository,
+    StoredAccess,
+)
 from app.repositories.live_sessions import (
     InMemoryLiveSessionRepository,
     LiveSessionRepository,
@@ -18,4 +31,15 @@ __all__ = [
     "RepositorySessionNotFound",
     "RepositoryStateInvalid",
     "SqlLiveSessionRepository",
+    "AccessExpired",
+    "AccessNotFound",
+    "AccessRevoked",
+    "InMemoryLiveAccessRepository",
+    "InvitationExpired",
+    "InvitationNotFound",
+    "InvitationRevoked",
+    "InvitationUsed",
+    "LiveAccessRepository",
+    "SqlLiveAccessRepository",
+    "StoredAccess",
 ]

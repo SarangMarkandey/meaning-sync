@@ -4,29 +4,42 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { AgreementMap } from "@/components/agreement-map";
+import { ConfirmationSummary } from "@/components/confirmation-summary";
+import { ChatMessageList, ConversationGuide } from "@/components/conversation-view";
+import { LiveProgress } from "@/components/live-flow-shell";
 import {
   api,
   type ClarityReceipt,
   type ClarificationResult,
+  type CurrencyCode,
   type LanguageCode,
   type PartyRole,
   type SessionView,
 } from "@/lib/api";
+import { useScrollToTop } from "@/lib/use-scroll-to-top";
 
-type Screen = "consent" | "evidence" | "map" | "clarification" | "receipt";
+type Screen =
+  | "consent"
+  | "evidence"
+  | "map"
+  | "clarification"
+  | "confirmation"
+  | "receipt";
 
 const roleNames: Record<PartyRole, string> = {
   hirer: "Homeowner",
   worker: "Electrician",
 };
 
-const defaultTeachback =
-  "One fan and two switches will be repaired starting today for ₹1,200 labour. Replacement parts remain as shown in the map.";
+const confirmationRecord =
+  "I reviewed the shared record, including every open and not-discussed item.";
 
 export function DemoExperience({
   participantLanguages,
+  currency,
 }: {
   participantLanguages: Record<PartyRole, LanguageCode>;
+  currency: CurrencyCode;
 }) {
   const [screen, setScreen] = useState<Screen>("consent");
   const [session, setSession] = useState<SessionView | null>(null);
@@ -39,10 +52,14 @@ export function DemoExperience({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  useScrollToTop(
+    `demo:${screen}:${activeParty}:${clarification?.revealed ?? false}`,
+  );
+
   useEffect(() => {
     let active = true;
     api
-      .createDemo(participantLanguages)
+      .createDemo(participantLanguages, currency)
       .then((created) => {
         if (active) setSession(created);
       })
@@ -59,7 +76,7 @@ export function DemoExperience({
     return () => {
       active = false;
     };
-  }, [participantLanguages]);
+  }, [currency, participantLanguages]);
 
   const perform = async (action: () => Promise<void>) => {
     setLoading(true);
@@ -116,7 +133,7 @@ export function DemoExperience({
   const confirmTeachback = (party: PartyRole) => {
     if (!session) return;
     void perform(async () => {
-      setSession(await api.confirm(session.id, party, defaultTeachback));
+      setSession(await api.confirm(session.id, party, confirmationRecord));
       setConfirmedParties((current) =>
         current.includes(party) ? current : [...current, party],
       );
@@ -160,9 +177,9 @@ export function DemoExperience({
 
       {screen === "consent" && session && (
         <FlowPage
-          step="01"
-          title="Start with clear consent"
-          subtitle="Each person agrees separately before the prepared conversation is reviewed."
+          stage="participation"
+          title="Who is taking part?"
+          subtitle="The Homeowner and Electrician each agree separately before the prepared conversation is shown."
         >
           <div className="consent-grid">
             {(["hirer", "worker"] as PartyRole[]).map((party) => {
@@ -208,32 +225,20 @@ export function DemoExperience({
 
       {screen === "evidence" && session && (
         <FlowPage
-          step="02"
-          title="Conversation evidence"
-          subtitle="A prepared English homeowner–electrician conversation. Every finding points back to an original statement."
+          stage="conversation"
+          title="Talk about the agreement"
+          subtitle="This prepared conversation uses the same evidence-first view as Live Mode."
         >
+          <ConversationGuide />
           {session.transcript.length ? (
-            <div className="transcript">
-              {session.transcript.map((turn, index) => (
-                <article className="turn" key={turn.id}>
-                  <span className="turn-number">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <div className={`avatar small ${turn.speaker}`}>
-                    {turn.speaker_name[0]}
-                  </div>
-                  <div>
-                    <header>
-                      <strong>{turn.speaker_name}</strong>
-                      <span>
-                        Original · {turn.original_language === "en" ? "English" : "Hindi"}
-                      </span>
-                    </header>
-                    <p>{turn.original_text}</p>
-                  </div>
-                </article>
-              ))}
-            </div>
+            <ChatMessageList messages={session.transcript.map((turn, index) => ({
+              id: turn.id,
+              role: turn.speaker,
+              roleName: turn.speaker_name,
+              text: turn.original_text,
+              order: index + 1,
+              timestamp: turn.timestamp,
+            }))} />
           ) : (
             <div className="empty-state">The prepared conversation is empty.</div>
           )}
@@ -242,32 +247,32 @@ export function DemoExperience({
             onClick={analyzeConversation}
             disabled={loading}
           >
-            Build agreement map <span>→</span>
+            Compare our understanding <span>→</span>
           </button>
         </FlowPage>
       )}
 
       {screen === "map" && session && (
         <FlowPage
-          step="03"
-          title="Agreement map"
-          subtitle="The deterministic demo separates shared meaning from conflicts and gaps."
+          stage="check_understanding"
+          title="Check your shared understanding"
+          subtitle="Review what matches, resolve any differences and leave anything undiscussed open."
         >
-          <AgreementMap terms={session.terms} />
+          <AgreementMap terms={session.terms} roleMode="demo" />
           <button
             className="button primary full"
             onClick={openClarification}
             disabled={loading}
           >
-            Clarify replacement parts <span>→</span>
+            Decide replacement parts <span>→</span>
           </button>
         </FlowPage>
       )}
 
       {screen === "clarification" && session && (
         <FlowPage
-          step="04"
-          title="Clarify separately"
+          stage="check_understanding"
+          title="Decide one open point"
           subtitle="One question, answered privately by each person. The first answer stays hidden until the second is submitted."
         >
           {session.clarification_questions.length ? (
@@ -346,38 +351,13 @@ export function DemoExperience({
                         : "The receipt will preserve this unresolved difference."}
                     </p>
                   </div>
-                  <div className="teachback">
-                    <span>Shared understanding check</span>
-                    <p>{defaultTeachback}</p>
-                  </div>
-                  <div className="confirmation-actions">
-                    {(["hirer", "worker"] as PartyRole[]).map((party) => {
-                      const confirmed = confirmedParties.includes(party);
-                      return (
-                        <button
-                          key={party}
-                          onClick={() => confirmTeachback(party)}
-                          disabled={confirmed || loading}
-                        >
-                          <span>{roleNames[party]}</span>
-                          <strong>
-                            {confirmed
-                              ? "Confirmed ✓"
-                              : "Confirm my understanding"}
-                          </strong>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {confirmedParties.length === 2 && (
-                    <button
-                      className="button primary full"
-                      onClick={finishDemo}
-                      disabled={loading}
-                    >
-                      Create clarity receipt <span>→</span>
-                    </button>
-                  )}
+                  <button
+                    className="button primary full"
+                    type="button"
+                    onClick={() => setScreen("confirmation")}
+                  >
+                    Continue to confirmation <span>→</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -389,9 +369,39 @@ export function DemoExperience({
         </FlowPage>
       )}
 
+      {screen === "confirmation" && session && (
+        <FlowPage
+          stage="confirm"
+          title="Confirm this shared record"
+          subtitle="Each person confirms separately. Unresolved and not-discussed points stay open."
+        >
+          <ConfirmationSummary terms={session.terms} />
+          <div className="confirmation-actions">
+            {(["hirer", "worker"] as PartyRole[]).map((party) => {
+              const confirmed = confirmedParties.includes(party);
+              return (
+                <button
+                  key={party}
+                  onClick={() => confirmTeachback(party)}
+                  disabled={confirmed || loading}
+                >
+                  <span>{roleNames[party]}</span>
+                  <strong>{confirmed ? "Confirmed ✓" : "Confirm my understanding"}</strong>
+                </button>
+              );
+            })}
+          </div>
+          {confirmedParties.length === 2 ? (
+            <button className="button primary full" onClick={finishDemo} disabled={loading}>
+              Create clarity receipt <span>→</span>
+            </button>
+          ) : null}
+        </FlowPage>
+      )}
+
       {screen === "receipt" && receipt && (
         <FlowPage
-          step="05"
+          stage="receipt"
           title="Clarity receipt"
           subtitle="A faithful snapshot of what matched, what did not, and what remains unsaid."
         >
@@ -401,12 +411,14 @@ export function DemoExperience({
               <div>
                 <p>Session complete</p>
                 <h2>{receipt.title}</h2>
+                <strong>MeaningSync Clarity Receipt — not a legal contract.</strong>
                 <span>
                   Created {new Date(receipt.completed_at).toLocaleString()}
                 </span>
               </div>
             </header>
             <AgreementMap terms={receipt.terms} />
+            <div className="receipt-meta"><div><span>Session currency</span><strong>{receipt.currency}</strong></div></div>
             <div className="confirmed-by">
               <span>Confirmed separately by</span>
               {receipt.confirmations.map((confirmation) => (
@@ -427,20 +439,21 @@ export function DemoExperience({
 }
 
 function FlowPage({
-  step,
+  stage,
   title,
   subtitle,
   children,
 }: {
-  step: string;
+  stage: "participation" | "conversation" | "check_understanding" | "confirm" | "receipt";
   title: string;
   subtitle: string;
   children: React.ReactNode;
 }) {
   return (
     <section className="flow-page">
+      <LiveProgress currentStage={stage} explanation={subtitle} />
       <header className="flow-heading">
-        <span>{step} / 05</span>
+        <span>{stage.replaceAll("_", " ")}</span>
         <h1>{title}</h1>
         <p>{subtitle}</p>
       </header>

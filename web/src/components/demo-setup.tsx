@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-import type { LanguageCode, PartyRole } from "@/lib/api";
+import { LiveProgress } from "@/components/live-flow-shell";
+import type { CurrencyCode, LanguageCode, PartyRole } from "@/lib/api";
 
 const participants: Array<{ role: PartyRole; title: string; label: string }> = [
   { role: "hirer", title: "Participant 1", label: "Homeowner" },
@@ -22,6 +23,7 @@ export function DemoSetup() {
     hirer: "en",
     worker: "en",
   });
+  const [currency, setCurrency] = useState<CurrencyCode>("INR");
   const supported = languages.hirer === "en" && languages.worker === "en";
 
   const startDemo = (event: FormEvent<HTMLFormElement>) => {
@@ -30,6 +32,7 @@ export function DemoSetup() {
     const query = new URLSearchParams({
       hirer_language: languages.hirer,
       worker_language: languages.worker,
+      currency,
     });
     router.push(`/demo?${query.toString()}`);
   };
@@ -43,6 +46,10 @@ export function DemoSetup() {
         </Link>
       </nav>
       <section className="setup-page">
+        <LiveProgress
+          currentStage="preferences"
+          explanation="The Demo uses the same six-step flow with prepared data."
+        />
         <header className="flow-heading">
           <span>Demo setup</span>
           <h1>Choose the conversation languages</h1>
@@ -83,6 +90,21 @@ export function DemoSetup() {
               {languageNames[languages.hirer]} ↔ {languageNames[languages.worker]}
             </strong>
           </div>
+          <label className="setup-currency" htmlFor="demo-currency">
+            Session currency
+            <select
+              id="demo-currency"
+              value={currency}
+              onChange={(event) =>
+                setCurrency(event.target.value as CurrencyCode)
+              }
+            >
+              <option value="INR">INR — Indian rupee</option>
+              <option value="USD" disabled>USD — Available in Live Mode</option>
+              <option value="EUR" disabled>EUR — Available in Live Mode</option>
+            </select>
+            <small>The prepared Demo uses INR evidence without conversion.</small>
+          </label>
           <p className="setup-availability">
             English conversations are available now. Hindi and mixed-language
             conversations are coming next.

@@ -124,12 +124,12 @@ const terms: AgreementTerm[] = [
 ];
 
 describe("AgreementMap", () => {
-  it("renders confirmed, clarification, and not-discussed sections", () => {
+  it("renders matches, decisions, and not-discussed sections", () => {
     render(<AgreementMap terms={terms} />);
 
-    expect(screen.getByRole("heading", { name: "Confirmed" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What matches" })).toBeVisible();
     expect(
-      screen.getByRole("heading", { name: "Needs clarification" }),
+      screen.getByRole("heading", { name: "Needs a decision" }),
     ).toBeVisible();
     expect(
       screen.getByRole("heading", { name: "Not discussed" }),
@@ -151,7 +151,7 @@ describe("AgreementMap", () => {
     expect(screen.getAllByText(/Homeowner · original · English/).length).toBeGreaterThan(0);
     const quote = screen.getByText("Repair the fan and two switches.");
     expect(quote).not.toBeVisible();
-    fireEvent.click(screen.getAllByText(/View evidence/)[0]);
+    fireEvent.click(screen.getAllByText(/View conversation evidence/)[0]);
     expect(quote).toBeVisible();
     expect(screen.getAllByText(/message 1/).length).toBeGreaterThan(0);
   });
@@ -159,7 +159,7 @@ describe("AgreementMap", () => {
   it("shows evidence controls only for discussed terms", () => {
     render(<AgreementMap terms={terms} />);
 
-    expect(screen.getAllByText(/View evidence/)).toHaveLength(3);
+    expect(screen.getAllByText(/View conversation evidence/)).toHaveLength(3);
     const completionCard = screen.getByText("Completion time").closest("article");
     expect(completionCard).not.toBeNull();
     expect(

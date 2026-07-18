@@ -17,9 +17,7 @@ from app.domain.agreement_guidance import (
     semantic_target,
 )
 from app.domain.understanding_choices import (
-    MAX_UNDERSTANDING_QUESTIONS,
     build_question_definition,
-    select_understanding_terms,
     semantic_meaning_fingerprint,
 )
 from app.repositories import (
@@ -74,6 +72,8 @@ from app.schemas.workflow import (
     ConfirmationRecord,
     ConfirmationStatusView,
     ConfirmationSubmission,
+    ConversationReentrySubmission,
+    DraftStatementSubmission,
     IssueReceiptSubmission,
     LiveClarityReceipt,
     LiveGuidanceAction,
@@ -85,6 +85,7 @@ from app.schemas.workflow import (
     NotApplicableProposal,
     NotApplicableProposalSubmission,
     OptionalDetailsReviewedSubmission,
+    ParticipantReadinessSubmission,
     ParticipantReviewStatus,
     ParticipantUnderstandingReview,
     ReceiptConfirmation,
@@ -149,15 +150,9 @@ class LiveSessionService:
 
     def create(self, submission: LiveSessionCreate) -> LiveSessionView:
         session_id = _id("live")
-        request = AgreementAnalysisRequest(
-            session_id=session_id,
-            mode=SessionMode.LIVE,
-            participants=submission.participants,
-            messages=submission.messages,
-        )
+        participants = submission.participants
         if any(
-            participant.id != participant.role.value
-            for participant in request.participants
+            participant.id != participant.role.value for participant in participants
         ):
             raise WorkflowFailure(
                 WorkflowErrorCode.PARTICIPANT_MISMATCH,
@@ -165,11 +160,25 @@ class LiveSessionService:
                 "worker roles.",
                 status_code=422,
             )
+        if {item.role for item in participants} != set(PartyRole) or any(
+            item.language.value != "en" for item in participants
+        ):
+            raise WorkflowFailure(
+                WorkflowErrorCode.INVALID_REQUEST,
+                "Live sessions currently require one English participant in each role.",
+                status_code=422,
+            )
         record = _LiveSessionRecord(
             id=session_id,
             created_at=_now(),
-            participants=[_deep_copy(item) for item in request.participants],
-            messages=[_deep_copy(item) for item in request.messages],
+            participants=[_deep_copy(item) for item in participants],
+            messages=[_deep_copy(item) for item in submission.messages],
+            participation_mode=submission.participation_mode,
+            currency=submission.currency,
+            creator_role=submission.creator_role,
+            participant_readiness={
+                role: bool(submission.messages) for role in PartyRole
+            },
         )
         try:
             self._repository.create(record)
@@ -184,6 +193,109 @@ class LiveSessionService:
 
     def get(self, session_id: str) -> LiveSessionView:
         return self._view(self._record(session_id))
+
+    def get_with_revision(self, session_id: str) -> tuple[LiveSessionView, int]:
+        try:
+            stored = self._repository.load(session_id)
+        except RepositorySessionNotFound as exc:
+            raise WorkflowFailure(
+                WorkflowErrorCode.SESSION_NOT_FOUND,
+                "This Live session could not be found.",
+                status_code=404,
+            ) from exc
+        except RepositorySessionExpired as exc:
+            raise WorkflowFailure(
+                WorkflowErrorCode.SESSION_EXPIRED,
+                "This Live session has expired and is no longer available.",
+                status_code=410,
+            ) from exc
+        except RepositoryStateInvalid as exc:
+            raise WorkflowFailure(
+                WorkflowErrorCode.STORED_STATE_INVALID,
+                "The stored Live session could not be loaded safely.",
+                status_code=500,
+            ) from exc
+        return self._view(stored.state), stored.revision
+
+    def add_draft_statement(
+        self,
+        session_id: str,
+        role: PartyRole,
+        submission: DraftStatementSubmission,
+    ) -> LiveSessionView:
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
+            self._require_stage(record, LiveSessionStage.CONVERSATION_DRAFT)
+            digest = self._request_digest("draft-statement", role.value, submission)
+            if self._is_replay(record, submission.request_id, digest):
+                return self._view(record)
+            participant = next(
+                item for item in record.participants if item.role == role
+            )
+            if len(record.messages) >= 80:
+                raise WorkflowFailure(
+                    WorkflowErrorCode.INVALID_REQUEST,
+                    "This conversation has reached its message limit.",
+                    status_code=422,
+                )
+            order = len(record.messages) + 1
+            record.messages.append(
+                AnalysisMessage(
+                    message_id=_id("message"),
+                    speaker_id=role.value,
+                    original_text=submission.original_text,
+                    original_language=participant.language,
+                    order=order,
+                    timestamp=_now(),
+                )
+            )
+            record.participant_readiness = {item: False for item in PartyRole}
+            self._invalidate_review(record)
+            self._invalidate_all_confirmations(record)
+            self._mark_processed(record, submission.request_id, digest)
+            return self._view(record)
+
+    def set_participant_readiness(
+        self,
+        session_id: str,
+        role: PartyRole,
+        submission: ParticipantReadinessSubmission,
+    ) -> LiveSessionView:
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
+            self._require_stage(record, LiveSessionStage.CONVERSATION_DRAFT)
+            digest = self._request_digest(
+                "conversation-readiness", role.value, submission
+            )
+            if self._is_replay(record, submission.request_id, digest):
+                return self._view(record)
+            record.participant_readiness[role] = submission.ready
+            self._mark_processed(record, submission.request_id, digest)
+            return self._view(record)
+
+    def reenter_conversation(
+        self,
+        session_id: str,
+        submission: ConversationReentrySubmission,
+    ) -> LiveSessionView:
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
+            digest = self._request_digest("conversation-reentry", None, submission)
+            if self._is_replay(record, submission.request_id, digest):
+                return self._view(record)
+            self._require_modifiable(record)
+            version = self._require_current_version(
+                record, submission.expected_agreement_version_id
+            )
+            if submission.item_key is not None:
+                self._term(version, submission.item_key)
+            record.stage = LiveSessionStage.CONVERSATION_DRAFT
+            record.conversation_reentry_item_key = submission.item_key
+            record.participant_readiness = {role: False for role in PartyRole}
+            self._invalidate_review(record)
+            self._invalidate_all_confirmations(record)
+            self._mark_processed(record, submission.request_id, digest)
+            return self._view(record)
 
     def list_versions(self, session_id: str) -> list[AgreementVersion]:
         return [_deep_copy(item) for item in self._record(session_id).versions]
@@ -207,15 +319,32 @@ class LiveSessionService:
     ) -> LiveSessionView:
         with self._transaction(session_id) as transaction:
             record = transaction.state
-            if record.stage != LiveSessionStage.CONVERSATION_DRAFT:
+            self._require_stage(record, LiveSessionStage.CONVERSATION_DRAFT)
+            if record.current_version_id is None:
+                if submission.expected_agreement_version_id is not None:
+                    raise self._stale(record)
+            else:
                 self._require_current_version(
                     record, submission.expected_agreement_version_id
                 )
-                raise self._invalid_state(
-                    record, "This session has already been analyzed."
+            if not all(
+                record.participant_readiness.get(role, False) for role in PartyRole
+            ):
+                raise WorkflowFailure(
+                    WorkflowErrorCode.INVALID_STATE,
+                    "Both participants must be ready before comparing "
+                    "the conversation.",
+                    status_code=409,
+                    current_agreement_version_id=record.current_version_id,
                 )
-            if submission.expected_agreement_version_id is not None:
-                raise self._stale(record)
+            if len(record.messages) < 2 or {
+                message.speaker_id for message in record.messages
+            } != {role.value for role in PartyRole}:
+                raise WorkflowFailure(
+                    WorkflowErrorCode.INVALID_REQUEST,
+                    "Add at least one meaningful statement from each person first.",
+                    status_code=422,
+                )
             record.stage = LiveSessionStage.ANALYZING
             request = self._analysis_request(record, record.messages)
         analyzing_revision = transaction.committed_revision
@@ -237,13 +366,15 @@ class LiveSessionService:
             session_id, expected_revision=analyzing_revision
         ) as completed:
             record = completed.state
-            if record.stage != LiveSessionStage.ANALYZING or record.versions:
+            if record.stage != LiveSessionStage.ANALYZING:
                 raise self._invalid_state(
                     record, "The analysis result is no longer current."
                 )
             version = self._build_analysis_version(record, response)
             self._commit_version(record, version)
             self._record_conversation_evidence(record, version)
+            record.participant_readiness = {role: False for role in PartyRole}
+            record.conversation_reentry_item_key = None
             self._select_next_stage(record)
             return self._view(record)
 
@@ -444,7 +575,7 @@ class LiveSessionService:
             if self._is_replay(record, submission.request_id, digest):
                 return self._view(record)
             self._require_modifiable(record)
-            version = self._require_current_version(
+            self._require_current_version(
                 record, submission.expected_agreement_version_id
             )
             active = self._active_question(record)
@@ -455,38 +586,12 @@ class LiveSessionService:
                     record, "Finish the private handoff before adding statements."
                 )
             messages = self._validated_appended_messages(record, submission.messages)
-            candidate_messages = [*record.messages, *messages]
-            request = self._analysis_request(record, candidate_messages)
-            previous_stage = record.stage
-            record.stage = LiveSessionStage.ANALYZING
-        analyzing_revision = transaction.committed_revision
-        if analyzing_revision is None:
-            raise RuntimeError("analyzing state was not persisted")
-
-        try:
-            response = await self._analyzer.analyze(request)
-        except Exception:
-            with self._transaction(
-                session_id, expected_revision=analyzing_revision
-            ) as failed:
-                current = failed.state
-                if current.stage == LiveSessionStage.ANALYZING:
-                    current.stage = previous_stage
-            raise
-
-        with self._transaction(
-            session_id, expected_revision=analyzing_revision
-        ) as completed:
-            record = completed.state
-            if record.current_version_id != version.id:
-                raise self._stale(record)
             record.messages.extend(messages)
-            new_version = self._build_analysis_version(record, response)
-            self._commit_version(record, new_version)
+            record.stage = LiveSessionStage.CONVERSATION_DRAFT
+            record.participant_readiness = {role: False for role in PartyRole}
             self._invalidate_review(record)
+            self._invalidate_all_confirmations(record)
             self._mark_processed(record, submission.request_id, digest)
-            self._record_conversation_evidence(record, new_version)
-            self._select_next_stage(record)
             return self._view(record)
 
     def propose_not_applicable(
@@ -654,87 +759,25 @@ class LiveSessionService:
                     record,
                     "Answer or explicitly leave the current clarification unresolved.",
                 )
-            if (
-                optional_item_keys(
-                    version.terms,
-                    self._mutually_not_applicable(version.not_applicable_proposals),
-                )
-                and not record.optional_details_reviewed
-            ):
-                raise self._invalid_state(
-                    record,
-                    "Review the optional missing details before checking "
-                    "understanding.",
-                )
             self._require_acknowledgments(
                 version, submission.acknowledged_unresolved_item_keys
             )
-            existing_checks = [
-                item
-                for item in record.questions
-                if item.question.kind == UnderstandingQuestionKind.UNDERSTANDING_CHECK
-            ]
-            remaining = MAX_UNDERSTANDING_QUESTIONS - len(existing_checks)
-            has_completed_clarification = self._has_current_completed_clarification(
-                record, version
-            )
-            if has_completed_clarification:
-                remaining = min(remaining, 1)
-            excluded_meanings = self._independently_answered_meanings(record)
-            candidates = select_understanding_terms(
-                version.terms,
-                excluded_meanings=excluded_meanings,
-                max_questions=remaining,
-            )
-            completed_prior_ids = [
-                item.question.id
-                for item in existing_checks
-                if item.question.status == UnderstandingQuestionStatus.COMPLETED
-                and self._completed_check_is_current(record, version, item)
-            ]
             created_at = _now()
             record.understanding_reviews = {
                 role: ParticipantUnderstandingReview(
                     id=_id("review"),
                     participant_id=role,
                     agreement_version_id=version.id,
-                    status=(
-                        ParticipantReviewStatus.CHECKING
-                        if candidates and role == PartyRole.HIRER
-                        else (
-                            ParticipantReviewStatus.NOT_STARTED
-                            if candidates
-                            else (
-                                ParticipantReviewStatus.COMPLETED
-                                if completed_prior_ids
-                                else ParticipantReviewStatus.SKIPPED
-                            )
-                        )
-                    ),
-                    completed_question_ids=completed_prior_ids,
+                    status=ParticipantReviewStatus.SKIPPED,
+                    completed_question_ids=[],
                     created_at=created_at,
-                    completed_at=None if candidates else created_at,
+                    completed_at=created_at,
                 )
                 for role in PartyRole
             }
-            total_questions = len(existing_checks) + len(candidates)
-            for index, term in enumerate(candidates, start=len(existing_checks) + 1):
-                self._append_question(
-                    record,
-                    version,
-                    term,
-                    kind=UnderstandingQuestionKind.UNDERSTANDING_CHECK,
-                    addressed=list(PartyRole),
-                    question_number=index,
-                    question_count=total_questions,
-                )
             self._mark_processed(record, submission.request_id, digest)
-            if not candidates:
-                record.stage = LiveSessionStage.AWAITING_CONFIRMATIONS
-                record.active_participant_id = PartyRole.HIRER
-            else:
-                record.stage = LiveSessionStage.AWAITING_UNDERSTANDING_CHECKS
-                record.active_participant_id = PartyRole.HIRER
+            record.stage = LiveSessionStage.AWAITING_CONFIRMATIONS
+            record.active_participant_id = record.creator_role
             return self._view(record)
 
     def submit_confirmation(
@@ -774,19 +817,13 @@ class LiveSessionService:
                     version, submission.unresolved_item_acknowledgments
                 )
             if submission.decision == ConfirmationDecision.REQUEST_CHANGE:
-                term = self._term(version, submission.change_item_key or "")
+                self._term(version, submission.change_item_key or "")
                 self._mark_processed(record, submission.request_id, digest)
                 self._invalidate_all_confirmations(record)
                 self._invalidate_review(record)
-                self._append_question(
-                    record,
-                    version,
-                    term,
-                    kind=UnderstandingQuestionKind.CLARIFICATION,
-                    addressed=list(PartyRole),
-                )
-                record.stage = LiveSessionStage.NEEDS_CLARIFICATION
-                record.active_participant_id = PartyRole.HIRER
+                record.stage = LiveSessionStage.CONVERSATION_DRAFT
+                record.conversation_reentry_item_key = submission.change_item_key
+                record.participant_readiness = {role: False for role in PartyRole}
                 return self._view(record)
 
             existing = next(
@@ -829,7 +866,9 @@ class LiveSessionService:
                 record.stage = LiveSessionStage.CONFIRMED
                 record.active_participant_id = None
             else:
-                record.active_participant_id = PartyRole.WORKER
+                record.active_participant_id = next(
+                    role for role in PartyRole if role != submission.participant_id
+                )
             return self._view(record)
 
     def issue_receipt(
@@ -1060,39 +1099,22 @@ class LiveSessionService:
         old_term: AgreementTerm,
     ) -> None:
         current_term = self._term(version, old_term.analysis_item_key)
-        attempts = (
-            source_question.attempt_number
-            if source_question.question.kind == UnderstandingQuestionKind.CLARIFICATION
-            else 0
-        )
-        if attempts >= self._clarification_attempt_limit:
-            if source_question.question.agreement_version_id != version.id:
-                marker = self._append_question(
-                    record,
-                    version,
-                    current_term,
-                    kind=UnderstandingQuestionKind.CLARIFICATION,
-                    addressed=list(PartyRole),
-                    attempt_number=attempts,
-                )
-                marker.question = marker.question.model_copy(
-                    update={"status": UnderstandingQuestionStatus.NEEDS_CLARIFICATION}
-                )
-            record.stage = LiveSessionStage.NEEDS_CLARIFICATION
-            record.active_participant_id = PartyRole.HIRER
-            return
-        self._append_question(
-            record,
-            version,
-            current_term,
-            kind=UnderstandingQuestionKind.CLARIFICATION,
-            addressed=list(PartyRole),
-            attempt_number=attempts + 1,
-        )
+        if source_question.question.agreement_version_id != version.id:
+            marker = self._append_question(
+                record,
+                version,
+                current_term,
+                kind=UnderstandingQuestionKind.CLARIFICATION,
+                addressed=list(PartyRole),
+                attempt_number=source_question.attempt_number,
+            )
+            marker.question = marker.question.model_copy(
+                update={"status": UnderstandingQuestionStatus.NEEDS_CLARIFICATION}
+            )
         if source_question.question.agreement_version_id != version.id:
             self._invalidate_review(record)
         record.stage = LiveSessionStage.NEEDS_CLARIFICATION
-        record.active_participant_id = PartyRole.HIRER
+        record.active_participant_id = record.creator_role
 
     def _advance_understanding_checks(
         self, record: _LiveSessionRecord, version: AgreementVersion
@@ -1109,7 +1131,7 @@ class LiveSessionService:
             }
         ]
         if pending:
-            record.active_participant_id = PartyRole.HIRER
+            record.active_participant_id = record.creator_role
             return
         completed_ids = list(
             dict.fromkeys(
@@ -1140,7 +1162,7 @@ class LiveSessionService:
             for role, review in record.understanding_reviews.items()
         }
         record.stage = LiveSessionStage.AWAITING_CONFIRMATIONS
-        record.active_participant_id = PartyRole.HIRER
+        record.active_participant_id = record.creator_role
 
     def _derive_version_from_selections(
         self,
@@ -1181,7 +1203,9 @@ class LiveSessionService:
                         participant_id=role.value,
                         role=role,
                         speaker_name=(
-                            "Homeowner" if role == PartyRole.HIRER else "Electrician"
+                            "Customer"
+                            if role == PartyRole.HIRER
+                            else "Service provider"
                         ),
                         message_id=message.message_id,
                         original_text=message.original_text,
@@ -1351,6 +1375,11 @@ class LiveSessionService:
             created_at=record.created_at,
             participants=[_deep_copy(item) for item in record.participants],
             messages=[_deep_copy(item) for item in record.messages],
+            participation_mode=record.participation_mode,
+            currency=record.currency,
+            creator_role=record.creator_role,
+            participant_readiness=dict(record.participant_readiness),
+            conversation_reentry_item_key=record.conversation_reentry_item_key,
             agreement_versions=[_deep_copy(item) for item in record.versions],
             current_agreement_version_id=record.current_version_id,
             questions=[_deep_copy(item.question) for item in record.questions],
@@ -1666,7 +1695,7 @@ class LiveSessionService:
                     UnderstandingQuestionStatus.UNSURE,
                 }
             ):
-                record.active_participant_id = PartyRole.HIRER
+                record.active_participant_id = record.creator_role
             else:
                 record.active_participant_id = (
                     active.question.addressed_participant_ids[0]
@@ -2297,9 +2326,9 @@ class LiveSessionService:
 
     def _participant_mismatch(self, expected: PartyRole | None) -> WorkflowFailure:
         name = (
-            "Homeowner"
+            "Customer"
             if expected == PartyRole.HIRER
-            else "Electrician"
+            else "Service provider"
             if expected == PartyRole.WORKER
             else "the active participant"
         )
@@ -2453,12 +2482,16 @@ class LiveSessionService:
             "agreement_version_id": version.id,
             "agreement_version_number": version.meaningful_version_number,
             "issued_at": issued_at,
+            "session_created_at": record.created_at,
+            "currency": record.currency,
             "participants": [
                 ReceiptParticipant(
                     participant_id=item.role,
                     role=item.role,
                     display_name=(
-                        "Homeowner" if item.role == PartyRole.HIRER else "Electrician"
+                        "Customer"
+                        if item.role == PartyRole.HIRER
+                        else "Service provider"
                     ),
                     language=item.language,
                 )
@@ -2486,6 +2519,9 @@ class LiveSessionService:
                 )
                 for item in record.questions
                 if item.question.kind == UnderstandingQuestionKind.CLARIFICATION
+            ],
+            "agreement_history": [
+                change for snapshot in record.versions for change in snapshot.changes
             ],
             "understanding_status": [
                 ReceiptUnderstandingStatus(

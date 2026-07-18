@@ -126,7 +126,7 @@ def test_deterministic_agreement_meaning_and_evidence(
     analyzed = analyze(service, discussion_session)
     terms = {term.topic: term for term in analyzed.terms}
 
-    assert terms[AgreementTopic.SCOPE].state == MeaningState.STATED_BY_ONE
+    assert terms[AgreementTopic.SCOPE].state == MeaningState.ALIGNED
     assert terms[AgreementTopic.PRICE].state == MeaningState.ALIGNED
     assert "₹1,200" in terms[AgreementTopic.PRICE].summary
     assert terms[AgreementTopic.MATERIALS].state == MeaningState.CONFLICTING

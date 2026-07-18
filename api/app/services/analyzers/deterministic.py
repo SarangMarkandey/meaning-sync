@@ -10,7 +10,7 @@ from app.schemas.analysis import (
 )
 from app.services.analyzers.validation import build_analysis_response
 
-DETERMINISTIC_PROMPT_VERSION = "deterministic-demo-v2"
+DETERMINISTIC_PROMPT_VERSION = "deterministic-demo-v3"
 
 
 class DeterministicAgreementAnalyzer:
@@ -24,17 +24,22 @@ class DeterministicAgreementAnalyzer:
                     topic=AgreementTopic.SCOPE,
                     facet=AgreementFacet.WORK,
                     neutral_summary=(
-                        "Repair one fan and two switches was stated by the homeowner."
+                        "Both participants agree to repair one fan and two switches."
                     ),
-                    state=MeaningState.STATED_BY_ONE,
+                    state=MeaningState.ALIGNED,
                     participant_positions=[
                         ModelParticipantPosition(
                             participant_id="hirer",
                             summary="Repair one fan and two switches.",
                             evidence_message_ids=["message-1"],
-                        )
+                        ),
+                        ModelParticipantPosition(
+                            participant_id="worker",
+                            summary="Repair one fan and two switches.",
+                            evidence_message_ids=["message-2"],
+                        ),
                     ],
-                    evidence_message_ids=["message-1"],
+                    evidence_message_ids=["message-1", "message-2"],
                 ),
                 ModelAgreementTerm(
                     item_key="price.amount",

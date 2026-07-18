@@ -51,6 +51,8 @@ const receipt: LiveClarityReceipt = {
   agreement_version_id: "version-2",
   agreement_version_number: 2,
   issued_at: "2026-07-16T11:00:00Z",
+  session_created_at: "2026-07-16T10:00:00Z",
+  currency: "INR",
   participants: [
     { participant_id: "hirer", role: "hirer", display_name: "Homeowner", language: "en" },
     { participant_id: "worker", role: "worker", display_name: "Electrician", language: "en" },
@@ -79,6 +81,7 @@ const receipt: LiveClarityReceipt = {
       semantic_target: "materials inclusion",
     },
   ],
+  agreement_history: [],
   understanding_status: [
     { participant_id: "hirer", review_id: "review-1", result: "completed", completed_at: "2026-07-16T10:50:00Z", question_ids: ["question-1"] },
     { participant_id: "worker", review_id: "review-2", result: "completed", completed_at: "2026-07-16T10:52:00Z", question_ids: ["question-1"] },
@@ -114,7 +117,7 @@ describe("ClarityReceiptView", () => {
     expect(screen.getByText("Labour price recorded meaning.")).toBeVisible();
     expect(screen.getByText("Materials inclusion recorded meaning.")).toBeVisible();
     expect(screen.getByText("Completion time recorded meaning.")).not.toBeVisible();
-    fireEvent.click(screen.getByText("Not discussed or proposed not applicable"));
+    fireEvent.click(screen.getByText("Open details and not-applicable proposals"));
     expect(screen.getByText("Completion time recorded meaning.")).toBeVisible();
     expect(screen.getByText(receipt.disclaimer)).toBeVisible();
     expect(screen.getByText(integrityHash)).not.toBeVisible();
@@ -138,13 +141,13 @@ describe("ClarityReceiptView", () => {
   it("names each not-applicable detail and who marked it", async () => {
     vi.spyOn(api, "getLiveReceipt").mockResolvedValue(receipt);
     render(<ClarityReceiptView sessionId="live-1" />);
-    fireEvent.click(await screen.findByText("Not discussed or proposed not applicable"));
+    fireEvent.click(await screen.findByText("Open details and not-applicable proposals"));
     expect(screen.getByText("Warranty")).toBeVisible();
     expect(
       screen.getByText((_, element) =>
         element?.tagName === "P" &&
         Boolean(element.textContent?.includes("No warranty applies to this repair.")) &&
-        Boolean(element.textContent?.includes("Homeowner and Electrician")),
+        Boolean(element.textContent?.includes("Customer and Service provider")),
       ),
     ).toBeVisible();
   });

@@ -2,7 +2,7 @@
 
 > Make sure both sides mean the same thing.
 
-MeaningSync compares two people’s stated understanding of a verbal service agreement. It does not force agreement, provide legal advice, generate a legal contract, verify identity, or collect signatures. The repository includes a key-free deterministic demo and an English, same-device Live flow powered by OpenAI from FastAPI only.
+MeaningSync compares two people’s stated understanding of a verbal service agreement. It does not force agreement, provide legal advice, generate a legal contract, verify identity, or collect signatures. The repository includes a key-free deterministic demo and English Live flows for a shared device or two separately authorized devices. Only FastAPI can call OpenAI.
 
 ## Local Setup
 
@@ -18,7 +18,7 @@ uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 `OPENAI_API_KEY` is optional for Demo Mode and required for Live agreement analysis or re-analysis. Check-understanding choices are constructed and validated deterministically by FastAPI; the normal choice path does not make an additional model request. Keep the key in `api/.env`; that file is ignored. The backend defaults to `OPENAI_MODEL=gpt-5.6`, forces `OPENAI_STORE_RESPONSES=false`, and uses a 30-second timeout. Configure explicit comma-separated frontend origins with `MEANINGSYNC_CORS_ORIGINS`. `MEANINGSYNC_CLARIFICATION_ATTEMPT_LIMIT=3` bounds repeated clarification for one agreement item.
 
-Live sessions use `MEANINGSYNC_DATABASE_URL`; local development defaults to the ignored `api/meaningsync-local.db` SQLite file. Run `uv run alembic upgrade head` before starting FastAPI. Production should use a backend-only PostgreSQL URL such as `postgresql+psycopg://...`, never a `NEXT_PUBLIC_*` variable. `MEANINGSYNC_SESSION_TTL_HOURS=24` controls expiry and accepts 1–720 hours. There is no automatic backup, user-facing deletion endpoint, or expired-row cleanup job yet.
+Live sessions use `MEANINGSYNC_DATABASE_URL`; local development defaults to the ignored `api/meaningsync-local.db` SQLite file. Run `uv run alembic upgrade head` before starting FastAPI. Production should use a backend-only PostgreSQL URL such as `postgresql+psycopg://...`, never a `NEXT_PUBLIC_*` variable. `MEANINGSYNC_SESSION_TTL_HOURS=24`, `MEANINGSYNC_ACCESS_TOKEN_TTL_HOURS=24`, and `MEANINGSYNC_INVITE_TTL_MINUTES=15` independently bound session, credential, and invitation lifetime. Raw secrets are never stored in SQL.
 
 In another terminal:
 
@@ -31,29 +31,45 @@ npm run dev
 
 Open `http://localhost:3000`. **Try Demo** starts the deterministic receipt flow. **Start Live Session** opens independent language setup and the English text workspace. Hindi is visible but disabled.
 
-## Guided Live Workflow
+For separate-device testing on an Ubuntu LAN, set the reachable host address in both env files:
 
-Setup sits before the five-stage progress indicator. After both people choose English, Live Mode creates a server-owned session and follows:
+```dotenv
+# api/.env
+MEANINGSYNC_CORS_ORIGINS=http://192.168.1.50:3000
 
-`Conversation → Clarify → Check understanding → Confirm → Receipt`
+# web/.env.local
+NEXT_PUBLIC_API_URL=http://192.168.1.50:8000
+NEXT_PUBLIC_MEANINGSYNC_APP_URL=http://192.168.1.50:3000
+NEXT_PUBLIC_LIVE_POLL_INTERVAL_MS=1500
+```
 
-**Analyzing** is a dedicated, non-clickable state while MeaningSync moves from Conversation to Clarify or Check understanding. The page shows one server-selected next action instead of asking users to interpret the lifecycle. Required issues are handled in a consistent order—scope, amount and price coverage, materials, timing, payment, then other critical responsibilities. A required issue may be resolved or carried forward only through an explicit **Continue unresolved** choice. Topics that were simply not discussed appear later as optional details and can be handled together rather than blocking the main path.
+Start Uvicorn with `--host 0.0.0.0` and Next.js with `npm run dev -- --hostname 0.0.0.0`. Allow only ports 3000 and 8000 on the trusted LAN; do not expose this development setup directly to the public internet.
 
-Clarification and Check understanding use neutral, tap-based options derived from recorded participant positions or shared meaning. Every question includes **Something else** and **I'm not sure**; free text is required only after **Something else** is selected. MeaningSync removes semantic duplicates and never repeats an item already independently answered during clarification. After a completed two-party clarification, it asks at most one additional high-impact question; if none remains, it proceeds directly to separate confirmation. Without clarification, a simple agreement normally receives one or two questions and a broad agreement receives at most three.
+## Conversation-first Workflow
 
-The interface uses progressive disclosure: plain-language summaries and the next action appear first; original evidence, technical item keys, previous maps, and optional details stay available on demand. Same-device handoffs separate Homeowner and Electrician selections and confirmations. The first selection is withheld until the second participant submits, but database persistence does not turn this presentation boundary into authentication or strong privacy.
+Demo and Live use the same six visible steps:
+
+`Preferences → Participation → Conversation → Check understanding → Confirm → Receipt`
+
+Preferences choose each person’s language and the session currency. Demo is the prepared English/INR scenario; Live supports English plus INR, USD, or EUR. Currency is metadata only: original evidence keeps the amount and currency stated by a participant, and MeaningSync does not convert values. Participation chooses **Customer** or **Service provider** as the creator role and a shared- or separate-device path. Separate-device sessions issue a role-bound credential to the creator and a single-use invitation to the opposite role. The join screen removes its fragment secret, exchanges it after the invited person accepts the notice, and both devices move to Conversation automatically.
+
+Conversation is a role-scoped text workspace, not a form or chatbot. Each person adds messages and marks themselves ready. A new message clears both readiness flags and any current confirmations. Only the session creator can choose **Compare what we mean**, and only after both people have spoken and are ready. **Analyzing** is a non-clickable loading state; messages never trigger analysis on their own.
+
+Check understanding shows one agreement map with **Matches**, **Needs a decision**, and **Not discussed** sections. Every non-missing item links to original evidence. Matching items require no extra controls. Conflicting or one-sided items use private, neutral choices; the first choice stays hidden until the other addressed person answers. Compatible choices can create a new immutable agreement version. Different choices remain unresolved and are not asked again until the people deliberately return to Conversation. Not-discussed topics are optional and never block confirmation.
+
+Confirmation is separate for each participant and binds the same current version. Requesting a change returns to Conversation, identifies the item to revisit, and invalidates old readiness and confirmations. The final clarity receipt preserves matching, unresolved, one-sided, and not-discussed items; roles, languages, session currency, original evidence currency, timestamps, agreement history, and an integrity hash. It is not a legal contract.
 
 Every analysis remains an immutable internal event. The user-facing Agreement Map version advances only when a deterministic semantic fingerprint shows a meaningful state or participant-position change, so retries, formatting differences, or neutral-summary wording alone do not create a noisy “new version.” Agreement versions, questions, private selections, clarification messages, confirmations, idempotency records, and receipts are stored as validated versioned JSON through the Live repository. They survive a backend restart until expiry. Demo Mode remains process-local.
 
 ## How MeaningSync was built with Codex and GPT-5.6
 
-Codex helped inspect the repository architecture, implement the FastAPI and Next.js workflow, add regression tests, and iterate on UI usability. The builder made the core product decisions: start with same-language conversations, preserve original evidence, clarify exact meanings, use choice-based understanding checks, state the same-device privacy boundary honestly, and position the output as a clarity receipt rather than a legal contract.
+Codex helped inspect the repository architecture, implement the FastAPI and Next.js workflow, add regression tests, and iterate on UI usability. The builder made the core product decisions: start with same-language conversations, preserve original evidence, clarify exact meanings, use choice-based understanding checks, state shared- and separate-device security boundaries honestly, and position the output as a clarity receipt rather than a legal contract.
 
 GPT-5.6 is the final hackathon model and performs the core English agreement analysis through the Responses API with Pydantic Structured Outputs and `store=False`. The `OPENAI_MODEL` environment setting remains available for local experiments, but the committed default is `gpt-5.6`. Clarification choices, semantic question deduplication, workflow transitions, and receipt generation are controlled by application code and do not trigger additional model calls.
 
 ## Current Limitations
 
-Live sessions are English text only and still use a same-device handoff. Durable storage does not provide authentication or participant isolation. There is no role-bound participant token, single-use invite exchange, QR joining, separate-device authorization, or realtime synchronization; those are P1B work.
+Live sessions are English text only. P1B credentials authorize one role in one session but do not verify a person’s identity. Synchronization uses bounded polling rather than WebSockets, and credentials last only in the browser session. There is no audio, translation, user account, automatic cleanup, user-facing deletion, electronic signature, or legal-contract status.
 
 ## Verification
 
@@ -75,6 +91,6 @@ Normal tests mock OpenAI and spend no credits. `RUN_OPENAI_INTEGRATION=1 pytest 
 
 ## Status
 
-Implemented: deterministic English demo; the guided five-stage English Live flow; server-derived next-action guidance; required-versus-optional issue handling; immutable internal agreement events with meaningful user-facing versions; exact choice-based clarification; bounded, deduplicated understanding checks; same-device independent selections; version-bound confirmations; an immutable clarity-receipt snapshot; and durable SQL-backed Live sessions with restart recovery, optimistic revisions, expiry, and persistent idempotency.
+Implemented: deterministic English/INR demo; the six-step conversation-first Live flow on shared or separate devices; creator-selectable Customer/Service provider roles; INR/USD/EUR session metadata; readiness-gated comparison; local QR joining; single-use invitations; role-bound bearer authorization; revision-aware polling and presence; choice-based decisions; version-bound confirmations; immutable receipts; and durable SQL-backed sessions with restart recovery, optimistic revisions, expiry, and persistent idempotency.
 
-Partially implemented: language-neutral data structures, same-device privacy cues, optional-detail batching, and time-based retention without automatic cleanup or deletion tooling. Planned: validated usability research, Hindi/translation, audio consent, P1B role-bound tokens and QR joining, realtime synchronization, authentication, backup/deletion operations, custom PDF generation, and identity or signature verification. MeaningSync records independent selections and makes differences visible; it does not prove comprehension, identity, consent, or legal enforceability.
+Partially implemented: language-neutral data structures, role authorization without identity verification, optional-detail batching, and time-based retention without automatic cleanup or deletion tooling. Planned: validated usability research, Hindi/translation, audio consent, backup/deletion operations, and privacy-preserving observability. MeaningSync records independent selections and makes differences visible; it does not prove comprehension, identity, consent, or legal enforceability.

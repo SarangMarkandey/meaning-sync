@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 from alembic.config import Config
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, select, update
 
 from alembic import command
-from app.main import app
+from app.main import app, lifespan
 from app.repositories import (
     RepositoryConflict,
     SqlLiveSessionRepository,
@@ -22,6 +22,7 @@ from app.schemas.understanding import (
 )
 from app.schemas.workflow import (
     AnalyzeLiveSessionSubmission,
+    CurrencyCode,
     IssueReceiptSubmission,
     LiveSessionStage,
     WorkflowErrorCode,
@@ -59,19 +60,71 @@ def workflow(database_url: str, *, analyzer=None) -> LiveSessionService:
     )
 
 
-def test_fastapi_lifecycle_recovers_created_session_after_restart(
+def test_state_v2_payload_upgrades_with_conversation_defaults(
     database_url: str,
 ) -> None:
-    with TestClient(app) as first_client:
-        response = first_client.post(
+    service = workflow(database_url)
+    created = service.create(create_submission())
+    service._repository.close()
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        payload = connection.execute(
+            select(LiveSessionRow.state_json).where(LiveSessionRow.id == created.id)
+        ).scalar_one()
+        payload["state_schema_version"] = 2
+        for field in (
+            "currency",
+            "creator_role",
+            "participant_readiness",
+            "conversation_reentry_item_key",
+        ):
+            payload.pop(field, None)
+        connection.execute(
+            update(LiveSessionRow)
+            .where(LiveSessionRow.id == created.id)
+            .values(state_schema_version=2, state_json=payload)
+        )
+    engine.dispose()
+
+    recovered = repository(database_url).load(created.id).state
+    assert recovered.state_schema_version == 3
+    assert recovered.currency == CurrencyCode.INR
+    assert recovered.creator_role == PartyRole.HIRER
+    assert recovered.participant_readiness == {
+        PartyRole.HIRER: False,
+        PartyRole.WORKER: False,
+    }
+    assert recovered.conversation_reentry_item_key is None
+
+
+@pytest.mark.anyio
+async def test_fastapi_lifecycle_recovers_created_session_after_restart(
+    database_url: str,
+) -> None:
+    async with (
+        lifespan(app),
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as first_client,
+    ):
+        response = await first_client.post(
             "/api/v1/live/sessions",
             json=create_submission().model_dump(mode="json"),
         )
         assert response.status_code == 201
         session_id = response.json()["id"]
-    with TestClient(app) as restarted_client:
-        assert restarted_client.get("/health").status_code == 200
-        recovered = restarted_client.get(f"/api/v1/live/sessions/{session_id}")
+        access_token = response.json()["access_credentials"][0]["access_token"]
+    async with (
+        lifespan(app),
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as restarted_client,
+    ):
+        assert (await restarted_client.get("/health")).status_code == 200
+        recovered = await restarted_client.get(
+            f"/api/v1/live/sessions/{session_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
     assert recovered.status_code == 200
     assert recovered.json()["id"] == session_id
 

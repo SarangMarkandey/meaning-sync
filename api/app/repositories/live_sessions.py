@@ -373,10 +373,22 @@ class SqlLiveSessionRepository:
 
     @staticmethod
     def _decode(schema_version: int, payload: dict) -> PersistedLiveSessionState:
-        if schema_version != 1 or payload.get("state_schema_version") != 1:
+        if (
+            schema_version not in {1, 2, 3}
+            or payload.get("state_schema_version") != schema_version
+        ):
             raise RepositoryStateInvalid("unsupported Live session state schema")
         try:
-            return PersistedLiveSessionState.model_validate(deepcopy(payload))
+            migrated = deepcopy(payload)
+            if schema_version in {1, 2}:
+                migrated["state_schema_version"] = 3
+                migrated.setdefault("currency", "INR")
+                migrated.setdefault("creator_role", "hirer")
+                migrated.setdefault(
+                    "participant_readiness", {"hirer": False, "worker": False}
+                )
+                migrated.setdefault("conversation_reentry_item_key", None)
+            return PersistedLiveSessionState.model_validate(migrated)
         except Exception as exc:
             raise RepositoryStateInvalid(
                 "stored Live session state is invalid"

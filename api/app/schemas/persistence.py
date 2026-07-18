@@ -19,7 +19,9 @@ from app.schemas.understanding import (
 from app.schemas.workflow import (
     AgreementVersion,
     ConfirmationRecord,
+    CurrencyCode,
     LiveClarityReceipt,
+    LiveParticipationMode,
     LiveSessionStage,
     ParticipantUnderstandingReview,
 )
@@ -37,11 +39,18 @@ class PersistedQuestionRecord(StrictModel):
 
 
 class PersistedLiveSessionState(StrictModel):
-    state_schema_version: Literal[1] = 1
+    state_schema_version: Literal[1, 2, 3] = 3
     id: str = Field(min_length=1, max_length=120)
     created_at: datetime
     participants: list[AnalysisParticipant] = Field(min_length=2, max_length=2)
-    messages: list[AnalysisMessage] = Field(min_length=2, max_length=80)
+    messages: list[AnalysisMessage] = Field(default_factory=list, max_length=80)
+    participation_mode: LiveParticipationMode = LiveParticipationMode.SAME_DEVICE
+    currency: CurrencyCode = CurrencyCode.INR
+    creator_role: PartyRole = PartyRole.HIRER
+    participant_readiness: dict[PartyRole, bool] = Field(
+        default_factory=lambda: {role: False for role in PartyRole}
+    )
+    conversation_reentry_item_key: str | None = None
     stage: LiveSessionStage = LiveSessionStage.CONVERSATION_DRAFT
     versions: list[AgreementVersion] = Field(default_factory=list)
     current_version_id: str | None = None

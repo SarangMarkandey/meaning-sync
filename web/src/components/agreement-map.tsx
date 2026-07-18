@@ -1,9 +1,5 @@
 import type { AgreementTerm, MeaningState } from "@/lib/api";
-
-const participantNames = {
-  hirer: "Homeowner",
-  worker: "Electrician",
-};
+import { roleLabel } from "@/lib/flow-presentation";
 
 const languageNames = {
   en: "English",
@@ -26,13 +22,13 @@ const sections: Array<{
   {
     states: ["aligned"],
     style: "confirmed",
-    title: "Confirmed",
+    title: "What matches",
     description: "Both participants explicitly support the same meaning",
   },
   {
     states: ["conflicting", "stated_by_one"],
     style: "conflict",
-    title: "Needs clarification",
+    title: "Needs a decision",
     description: "Meanings conflict or only one participant stated the term",
   },
   {
@@ -43,7 +39,15 @@ const sections: Array<{
   },
 ];
 
-export function AgreementMap({ terms }: { terms: AgreementTerm[] }) {
+export function AgreementMap({
+  terms,
+  roleMode = "demo",
+  onDiscussMissing,
+}: {
+  terms: AgreementTerm[];
+  roleMode?: "live" | "demo";
+  onDiscussMissing?: (itemKey: string) => void;
+}) {
   if (!terms.length) {
     return (
       <div className="empty-state" role="status">
@@ -84,7 +88,7 @@ export function AgreementMap({ terms }: { terms: AgreementTerm[] }) {
                         <div className="position-list">
                           {term.participant_positions.map((position) => (
                             <div key={position.participant_id}>
-                              <span>{participantNames[position.role]}</span>
+                              <span>{roleLabel(position.role, roleMode)}</span>
                               <p>{position.summary}</p>
                             </div>
                           ))}
@@ -92,7 +96,7 @@ export function AgreementMap({ terms }: { terms: AgreementTerm[] }) {
                       )}
                     {term.evidence.length > 0 && (
                       <details className="evidence">
-                        <summary>View evidence ({term.evidence.length})</summary>
+                        <summary>View conversation evidence ({term.evidence.length})</summary>
                         <ul>
                           {term.evidence.map((reference) => (
                             <li
@@ -114,6 +118,11 @@ export function AgreementMap({ terms }: { terms: AgreementTerm[] }) {
                         </ul>
                       </details>
                     )}
+                    {term.state === "not_discussed" && onDiscussMissing ? (
+                      <button className="text-action" type="button" onClick={() => onDiscussMissing(term.analysis_item_key)}>
+                        Discuss this
+                      </button>
+                    ) : null}
                   </article>
                 ))
               ) : (
