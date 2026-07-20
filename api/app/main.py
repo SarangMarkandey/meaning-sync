@@ -18,6 +18,7 @@ from app.schemas.analysis import (
     AnalysisErrorResponse,
 )
 from app.schemas.workflow import (
+    AudioTranscriptionConfiguration,
     WorkflowErrorCode,
     WorkflowErrorDetail,
     WorkflowErrorResponse,
@@ -25,6 +26,10 @@ from app.schemas.workflow import (
 from app.services.analyzers import OpenAIAgreementAnalyzer
 from app.services.live_access import LiveAccessService
 from app.services.live_sessions import LiveSessionService
+from app.services.transcriptions import (
+    OpenAIRealtimeSessionInitializer,
+    RealtimeTranscriptionService,
+)
 
 
 @asynccontextmanager
@@ -37,10 +42,37 @@ async def lifespan(application: FastAPI):
     repository.validate()
     access_repository = SqlLiveAccessRepository(settings.meaningsync_database_url)
     access_repository.validate()
+    audio_configuration = AudioTranscriptionConfiguration(
+        model=settings.openai_transcription_model,
+        consent_notice_version=settings.meaningsync_audio_consent_notice_version,
+        max_turn_duration_seconds=settings.meaningsync_audio_max_turn_seconds,
+        max_session_duration_seconds_per_participant=(
+            settings.meaningsync_audio_max_session_seconds_per_participant
+        ),
+        initialization_timeout_seconds=(
+            settings.meaningsync_realtime_initialization_timeout_seconds
+        ),
+        idle_timeout_seconds=settings.meaningsync_audio_idle_timeout_seconds,
+        max_transcript_length=settings.meaningsync_audio_max_transcript_length,
+        max_concurrent_sessions_per_participant=(
+            settings.meaningsync_audio_max_concurrent_sessions_per_participant
+        ),
+    )
     application.state.live_session_service = LiveSessionService(
         analyzer=OpenAIAgreementAnalyzer(settings=settings),
         repository=repository,
         clarification_attempt_limit=settings.meaningsync_clarification_attempt_limit,
+        audio_configuration=audio_configuration,
+    )
+    application.state.realtime_transcription_service = RealtimeTranscriptionService(
+        OpenAIRealtimeSessionInitializer(settings),
+        max_concurrent_per_participant=(
+            audio_configuration.max_concurrent_sessions_per_participant
+        ),
+        lease_seconds=(
+            audio_configuration.max_turn_duration_seconds
+            + audio_configuration.idle_timeout_seconds
+        ),
     )
     application.state.live_session_repository = repository
     application.state.live_access_service = LiveAccessService(
@@ -70,7 +102,12 @@ app.add_middleware(
     allow_origins=cors_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-MeaningSync-Revision",
+        "X-Request-ID",
+    ],
 )
 app.include_router(sessions_router)
 app.include_router(analysis_router)

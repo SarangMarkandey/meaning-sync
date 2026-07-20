@@ -16,7 +16,9 @@ uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-`OPENAI_API_KEY` is optional for Demo Mode and required for Live agreement analysis or re-analysis. Check-understanding choices are constructed and validated deterministically by FastAPI; the normal choice path does not make an additional model request. Keep the key in `api/.env`; that file is ignored. The backend defaults to `OPENAI_MODEL=gpt-5.6`, forces `OPENAI_STORE_RESPONSES=false`, and uses a 30-second timeout. Configure explicit comma-separated frontend origins with `MEANINGSYNC_CORS_ORIGINS`. `MEANINGSYNC_CLARIFICATION_ATTEMPT_LIMIT=3` bounds repeated clarification for one agreement item.
+`OPENAI_API_KEY` is optional for Demo Mode and required for Live agreement analysis, re-analysis, and microphone transcription. Check-understanding choices are constructed and validated deterministically by FastAPI; the normal choice path does not make an additional model request. Keep the key in `api/.env`; that file is ignored. The backend defaults to `OPENAI_MODEL=gpt-5.6`, forces `OPENAI_STORE_RESPONSES=false`, and uses a 30-second timeout. Configure explicit comma-separated frontend origins with `MEANINGSYNC_CORS_ORIGINS`. `MEANINGSYNC_CLARIFICATION_ATTEMPT_LIMIT=3` bounds repeated clarification for one agreement item.
+
+Audio defaults to `OPENAI_TRANSCRIPTION_MODEL=gpt-realtime-whisper`, a 60-second turn, 600 seconds per participant/session, 12-second initialization timeout, 20-second finalization idle timeout, 2,000-character finalized transcript, and one overlapping initializer per role. All are documented in `api/.env.example`. Browser microphones require HTTPS or the `http://localhost` development exception; a plain LAN IP may be rejected.
 
 Live sessions use `MEANINGSYNC_DATABASE_URL`; local development defaults to the ignored `api/meaningsync-local.db` SQLite file. Run `uv run alembic upgrade head` before starting FastAPI. Production should use a backend-only PostgreSQL URL such as `postgresql+psycopg://...`, never a `NEXT_PUBLIC_*` variable. `MEANINGSYNC_SESSION_TTL_HOURS=24`, `MEANINGSYNC_ACCESS_TOKEN_TTL_HOURS=24`, and `MEANINGSYNC_INVITE_TTL_MINUTES=15` independently bound session, credential, and invitation lifetime. Raw secrets are never stored in SQL.
 
@@ -53,7 +55,7 @@ Demo and Live use the same six visible steps:
 
 Preferences choose each person’s language and the session currency. Demo is the prepared English/INR scenario; Live supports English plus INR, USD, or EUR. Currency is metadata only: original evidence keeps the amount and currency stated by a participant, and MeaningSync does not convert values. Participation chooses **Customer** or **Service provider** as the creator role and a shared- or separate-device path. Separate-device sessions issue a role-bound credential to the creator and a single-use invitation to the opposite role. The join screen removes its fragment secret, exchanges it after the invited person accepts the notice, and both devices move to Conversation automatically.
 
-Conversation is a role-scoped text workspace, not a form or chatbot. Each person adds messages and marks themselves ready. A new message clears both readiness flags and any current confirmations. Only the session creator can choose **Compare what we mean**, and only after both people have spoken and are ready. **Analyzing** is a non-clickable loading state; messages never trigger analysis on their own.
+Conversation is a role-scoped Type/Speak workspace, not a form, call, or chatbot. Typed text remains available throughout. Speak requires participant-specific, versioned consent before microphone access. The browser uses transcription-only WebRTC initialized by FastAPI; MeaningSync stores only a reviewed finalized transcript and correction provenance, never raw audio, SDP, partial deltas, or credentials. Text and audio transcripts share one chronological ledger. A new message clears both readiness flags and current confirmations. Only the session creator can compare after both people have spoken and are ready.
 
 Check understanding shows one agreement map with **Matches**, **Needs a decision**, and **Not discussed** sections. Every non-missing item links to original evidence. Matching items require no extra controls. Conflicting or one-sided items use private, neutral choices; the first choice stays hidden until the other addressed person answers. Compatible choices can create a new immutable agreement version. Different choices remain unresolved and are not asked again until the people deliberately return to Conversation. Not-discussed topics are optional and never block confirmation.
 
@@ -69,7 +71,7 @@ GPT-5.6 is the final hackathon model and performs the core English agreement ana
 
 ## Current Limitations
 
-Live sessions are English text only. P1B credentials authorize one role in one session but do not verify a person’s identity. Synchronization uses bounded polling rather than WebSockets, and credentials last only in the browser session. There is no audio, translation, user account, automatic cleanup, user-facing deletion, electronic signature, or legal-contract status.
+Live sessions are English only; Conversation accepts typed text or reviewed audio transcripts. P1B credentials authorize one role in one session but do not verify identity. Synchronization uses bounded polling. There is no translation, diarization, participant audio call, AI voice response, user account, automatic cleanup, user-facing deletion, electronic signature, or legal-contract status. Microphone access requires HTTPS or `http://localhost`; ordinary LAN HTTP may be rejected by browsers.
 
 ## Verification
 
@@ -88,9 +90,10 @@ npm run build
 ```
 
 Normal tests mock OpenAI and spend no credits. `RUN_OPENAI_INTEGRATION=1 pytest tests/test_evaluations.py` is an explicit paid evaluation and is skipped by default.
+The Realtime initializer harness is also disabled by default; it requires `RUN_OPENAI_TRANSCRIPTION_INTEGRATION=1` plus an authorized key and a valid `OPENAI_REALTIME_TEST_SDP` offer. Do not enable either paid gate during routine verification.
 
 ## Status
 
-Implemented: deterministic English/INR demo; the six-step conversation-first Live flow on shared or separate devices; creator-selectable Customer/Service provider roles; INR/USD/EUR session metadata; readiness-gated comparison; local QR joining; single-use invitations; role-bound bearer authorization; revision-aware polling and presence; choice-based decisions; version-bound confirmations; immutable receipts; and durable SQL-backed sessions with restart recovery, optimistic revisions, expiry, and persistent idempotency.
+Implemented: deterministic English/INR demo; the six-step conversation-first Live flow on shared or separate devices; consent-gated transcription-only WebRTC with review/correction and typed fallback; creator-selectable Customer/Service provider roles; INR/USD/EUR session metadata; readiness-gated comparison; local QR joining; single-use invitations; role-bound bearer authorization; revision-aware polling and presence; choice-based decisions; version-bound confirmations; immutable receipts; and durable SQL-backed sessions with restart recovery, optimistic revisions, expiry, and persistent idempotency.
 
-Partially implemented: language-neutral data structures, role authorization without identity verification, optional-detail batching, and time-based retention without automatic cleanup or deletion tooling. Planned: validated usability research, Hindi/translation, audio consent, backup/deletion operations, and privacy-preserving observability. MeaningSync records independent selections and makes differences visible; it does not prove comprehension, identity, consent, or legal enforceability.
+Partially implemented: language-neutral data structures, role authorization without identity verification, optional-detail batching, and time-based retention without automatic cleanup or deletion tooling. Planned: validated usability research, Hindi/translation, backup/deletion operations, and privacy-preserving observability. MeaningSync records independent selections and makes differences visible; it does not prove comprehension, identity, consent, or legal enforceability.

@@ -134,7 +134,10 @@ export type LiveErrorCode =
   | "invitation_invalid"
   | "invitation_expired"
   | "invitation_used"
-  | "invitation_revoked";
+  | "invitation_revoked"
+  | "audio_consent_required"
+  | "audio_limit_reached"
+  | "transcription_unavailable";
 export type SessionStage =
   | "created"
   | "consent_pending"
@@ -169,6 +172,11 @@ export interface EvidenceReference {
   original_language: LanguageCode;
   order: number | null;
   timestamp: string | null;
+  input_source?: "text" | "audio_transcript";
+  raw_transcript?: string | null;
+  corrected_text?: string | null;
+  transcription_model?: string | null;
+  consent_id?: string | null;
 }
 
 export interface ParticipantPosition {
@@ -272,6 +280,36 @@ export interface AnalysisMessage {
   original_language: LanguageCode;
   order: number;
   timestamp: string;
+  input_source?: "text" | "audio_transcript";
+  raw_transcript?: string | null;
+  corrected_text?: string | null;
+  effective_text?: string | null;
+  transcription_model?: string | null;
+  transcription_request_id?: string | null;
+  consent_id?: string | null;
+  audio_started_at?: string | null;
+  audio_completed_at?: string | null;
+  audio_duration_seconds?: number | null;
+}
+
+export interface AudioConsent {
+  id: string;
+  session_id: string;
+  participant_role: PartyRole;
+  notice_version: string;
+  consented_at: string;
+  request_id: string;
+}
+
+export interface AudioTranscriptionConfiguration {
+  model: string;
+  consent_notice_version: string;
+  max_turn_duration_seconds: number;
+  max_session_duration_seconds_per_participant: number;
+  initialization_timeout_seconds: number;
+  idle_timeout_seconds: number;
+  max_transcript_length: number;
+  max_concurrent_sessions_per_participant: number;
 }
 
 export interface AgreementAnalysisRequest {
@@ -422,6 +460,9 @@ export interface LiveSessionView {
     status: "waiting" | "connected" | "offline";
     last_seen_at: string | null;
   }>;
+  audio_consents?: Partial<Record<PartyRole, AudioConsent>>;
+  audio_duration_seconds?: Partial<Record<PartyRole, number>>;
+  audio_configuration?: AudioTranscriptionConfiguration;
   agreement_versions: AgreementVersion[];
   current_agreement_version_id: string | null;
   questions: UnderstandingQuestion[];
@@ -588,6 +629,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   return response.json() as Promise<T>;
+}
+
+async function requestSdp(path: string, init: RequestInit): Promise<string> {
+  const response = await fetch(`${API_URL}${path}`, init);
+  if (!response.ok) {
+    const problem = (await response.json().catch(() => null)) as {
+      detail?: { code?: LiveErrorCode; message?: string; retryable?: boolean };
+    } | null;
+    throw new MeaningSyncApiError(
+      problem?.detail?.message ?? "The microphone connection could not be started.",
+      problem?.detail?.code ?? "request_failed",
+      problem?.detail?.retryable ?? response.status >= 500,
+      response.status,
+    );
+  }
+  return response.text();
 }
 
 const authorized = (accessToken: string): HeadersInit => ({
@@ -818,6 +875,68 @@ export const api = {
       method: "POST",
       headers: authorized(accessToken),
       body: JSON.stringify({ original_text: originalText, request_id: requestId }),
+    }),
+  recordAudioConsent: (
+    sessionId: string,
+    noticeVersion: string,
+    expectedRevision: number,
+    requestId: string,
+    accessToken: string,
+  ) =>
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/audio-consent`, {
+      method: "POST",
+      headers: authorized(accessToken),
+      body: JSON.stringify({
+        accepted: true,
+        notice_version: noticeVersion,
+        expected_revision: expectedRevision,
+        request_id: requestId,
+      }),
+    }),
+  initializeAudioTranscription: (
+    sessionId: string,
+    offerSdp: string,
+    expectedRevision: number,
+    requestId: string,
+    accessToken: string,
+  ) =>
+    requestSdp(`${liveSessionPath(sessionId)}/transcription-session`, {
+      method: "POST",
+      headers: {
+        ...authorized(accessToken),
+        "Content-Type": "application/sdp",
+        "X-MeaningSync-Revision": String(expectedRevision),
+        "X-Request-ID": requestId,
+      },
+      body: offerSdp,
+    }),
+  endAudioTranscription: (sessionId: string, accessToken: string) =>
+    fetch(`${API_URL}${liveSessionPath(sessionId)}/transcription-session/end`, {
+      method: "POST",
+      headers: authorized(accessToken),
+      keepalive: true,
+    })
+      .then(() => undefined)
+      .catch(() => undefined),
+  addAudioTranscript: (
+    sessionId: string,
+    submission: {
+      raw_transcript: string;
+      corrected_text?: string;
+      started_at: string;
+      completed_at: string;
+      duration_seconds: number;
+      transcription_model: string;
+      consent_id: string;
+      expected_revision: number;
+      request_id: string;
+    },
+    accessToken: string,
+  ) =>
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/audio-transcripts`, {
+      method: "POST",
+      headers: authorized(accessToken),
+      body: JSON.stringify(submission),
     }),
   setLiveReadiness: (
     sessionId: string,

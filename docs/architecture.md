@@ -4,7 +4,7 @@
 
 Next.js remains the only browser application and FastAPI the only backend. Setup records independent languages, INR/USD/EUR session metadata, the creator’s Customer/Service provider role, and shared- or separate-device participation. Shared-device creation returns both role credentials; separate-device creation returns the creator credential and an invitation for the opposite role. Next.js renders the QR locally. The join page removes the URL-fragment secret immediately, shows the data notice, exchanges the secret with FastAPI after acceptance, and stores the resulting credential in `sessionStorage`.
 
-Both devices call the same JSON workflow APIs and poll at roughly 1.5 seconds. FastAPI authenticates before loading or mutating Live state, enforces participant ownership, and returns a scoped view with revision and presence. SQL stores session `state-v3`, credential hashes, and invitation hashes in separate tables. OpenAI remains backend-only and is called only by the creator’s explicit, readiness-gated analysis transition.
+Both devices call the same workflow APIs and poll at roughly 1.5 seconds. FastAPI authenticates before loading or mutating Live state, enforces participant ownership, and returns a scoped view with revision and presence. SQL stores session `state-v4`, credential hashes, and invitation hashes in separate tables. OpenAI remains backend-only: agreement analysis follows the creator’s readiness-gated action, while a participant may explicitly initialize transcription-only WebRTC during Conversation.
 
 ```text
 Host browser ── bearer + JSON ─┐
@@ -18,12 +18,13 @@ Worker browser ─ bearer + JSON ┘       └── OpenAI (explicit analysis o
 
 ```mermaid
 flowchart LR
-  Browser[Next.js six-step UI] -->|typed JSON| API[FastAPI]
+  Browser[Next.js six-step UI] -->|typed JSON / WebRTC SDP| API[FastAPI]
   API --> Live[Live session service]
   Live --> Repo[LiveSessionRepository]
   Repo --> SQL[(PostgreSQL production / SQLite local)]
   API --> Demo[Deterministic demo service]
   Live --> Analyzer[OpenAI agreement analyzer]
+  API --> Realtime[OpenAI Realtime transcription-only WebRTC]
   Analyzer --> Validate[Application validation and evidence hydration]
   Validate --> Versions[Immutable agreement versions]
   Versions --> Questions[Deterministic choice builder and validator]
@@ -34,7 +35,7 @@ flowchart LR
   Demo --> Fixture[Key-free deterministic scenario]
 ```
 
-Only FastAPI imports the OpenAI SDK or reads `OPENAI_API_KEY`. Live agreement analysis uses the Responses API with Pydantic Structured Outputs, configured timeouts, and `store=False`. Provider failure returns a controlled error; Live never falls back to deterministic fixture output. Question selection, option construction, option validation, and same-device comparison are deterministic application rules and add no model request on the normal path. Demo remains deterministic and key-free.
+Only FastAPI reads `OPENAI_API_KEY`. Live agreement analysis uses the Responses API with Structured Outputs and `store=False`. For audio, the browser sends an authorized SDP offer to FastAPI; FastAPI uses the unified Realtime call initializer and returns only the SDP answer. Browser WebRTC carries local microphone media for transcription only, while partial/final events arrive on its data channel. Partial deltas stay transient; only a reviewed final transcript enters the existing message API. No raw audio, SDP, WebRTC object, partial delta, or credential enters durable state. Demo remains deterministic and key-free.
 
 ## User Journey and Guidance Boundary
 
@@ -91,8 +92,8 @@ Confirmations bind participant, current agreement version, unresolved acknowledg
 
 ## Storage and Recovery
 
-Live workflow state is an explicit Pydantic-validated `state-v3` JSON document behind one `LiveSessionRepository` abstraction; readers migrate stored v1/v2 documents with safe defaults. `SqlLiveSessionRepository` stores the document with a monotonic revision, creation/update timestamps, and expiry. Every mutation loads and validates within a transaction and updates only when the expected revision still matches. PostgreSQL is the production recommendation; ignored SQLite is supported for local work and repository tests. `InMemoryLiveSessionRepository` is an explicit deterministic test implementation, never a production fallback.
+Live workflow state is an explicit Pydantic-validated `state-v4` JSON document behind one `LiveSessionRepository` abstraction; readers migrate stored v1/v2/v3 documents with safe audio defaults. `SqlLiveSessionRepository` stores the document with a monotonic revision, creation/update timestamps, and expiry. Every mutation loads and validates within a transaction and updates only when the expected revision still matches. PostgreSQL is the production recommendation; ignored SQLite is supported for local work and repository tests. `InMemoryLiveSessionRepository` is an explicit deterministic test implementation, never a production fallback.
 
 Analysis uses two transactions: persist `analyzing`, release the database while awaiting OpenAI, then commit only against the expected analyzing revision. Controlled provider failure restores a retryable stage without deleting durable state. Alembic owns schema changes; startup validates connectivity and migration presence rather than calling `create_all()`.
 
-Live sessions and receipts survive backend restarts until `MEANINGSYNC_SESSION_TTL_HOURS` expires. Expired sessions return HTTP 410; automatic row cleanup, backups, and user-facing deletion are not implemented. Demo sessions remain process-local. P1B supports both shared-device handoff and separate-device participation. Separate-device sessions use role-bound access records, atomic single-use invitation exchange, locally rendered QR codes, and revision-aware polling; only secret hashes are persisted. These controls authorize a credential, not a person's identity. Audio, multilingual flows, and custom PDF output remain separate work. MeaningSync does not prove identity or consent, provide legal advice, or create a legally enforceable contract.
+Live sessions, audio consent, finalized transcripts, and receipts survive backend restarts until `MEANINGSYNC_SESSION_TTL_HOURS` expires. Expired sessions return HTTP 410; automatic cleanup, backups, and user-facing deletion are not implemented. Demo remains process-local. Shared-device audio uses an explicit active role and private handoff; separate-device audio uses the bearer role and captures only that device. There is no diarization or participant call. These controls authorize a credential, not identity. Multilingual flows and custom PDF output remain separate work. MeaningSync does not prove identity or consent, provide legal advice, or create a legally enforceable contract.

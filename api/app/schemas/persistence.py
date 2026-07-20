@@ -18,6 +18,7 @@ from app.schemas.understanding import (
 )
 from app.schemas.workflow import (
     AgreementVersion,
+    AudioConsent,
     ConfirmationRecord,
     CurrencyCode,
     LiveClarityReceipt,
@@ -39,7 +40,7 @@ class PersistedQuestionRecord(StrictModel):
 
 
 class PersistedLiveSessionState(StrictModel):
-    state_schema_version: Literal[1, 2, 3] = 3
+    state_schema_version: Literal[1, 2, 3, 4] = 4
     id: str = Field(min_length=1, max_length=120)
     created_at: datetime
     participants: list[AnalysisParticipant] = Field(min_length=2, max_length=2)
@@ -49,6 +50,10 @@ class PersistedLiveSessionState(StrictModel):
     creator_role: PartyRole = PartyRole.HIRER
     participant_readiness: dict[PartyRole, bool] = Field(
         default_factory=lambda: {role: False for role in PartyRole}
+    )
+    audio_consents: dict[PartyRole, AudioConsent] = Field(default_factory=dict)
+    audio_duration_seconds: dict[PartyRole, float] = Field(
+        default_factory=lambda: {role: 0.0 for role in PartyRole}
     )
     conversation_reentry_item_key: str | None = None
     stage: LiveSessionStage = LiveSessionStage.CONVERSATION_DRAFT

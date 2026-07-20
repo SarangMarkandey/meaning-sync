@@ -14,6 +14,20 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-5.6"
     openai_store_responses: bool = False
     openai_request_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    openai_transcription_model: str = "gpt-realtime-whisper"
+    meaningsync_audio_consent_notice_version: str = "audio-transcription-v1"
+    meaningsync_audio_max_turn_seconds: int = Field(default=60, ge=5, le=3600)
+    meaningsync_audio_max_session_seconds_per_participant: int = Field(
+        default=600, ge=5, le=86400
+    )
+    meaningsync_realtime_initialization_timeout_seconds: float = Field(
+        default=12, gt=0, le=120
+    )
+    meaningsync_audio_idle_timeout_seconds: int = Field(default=20, ge=5, le=600)
+    meaningsync_audio_max_transcript_length: int = Field(default=2000, ge=2, le=20000)
+    meaningsync_audio_max_concurrent_sessions_per_participant: int = Field(
+        default=1, ge=1, le=5
+    )
     meaningsync_clarification_attempt_limit: int = Field(default=3, ge=1, le=10)
     meaningsync_database_url: str = "sqlite:///./meaningsync-local.db"
     meaningsync_session_ttl_hours: int = Field(default=24, ge=1, le=720)

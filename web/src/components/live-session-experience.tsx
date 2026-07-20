@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { LiveBrandBar, LiveProgress } from "@/components/live-flow-shell";
 import { ConfirmationSummary } from "@/components/confirmation-summary";
 import { ChatMessageList, ConversationGuide } from "@/components/conversation-view";
+import { LiveAudioComposer } from "@/components/live-audio-composer";
 import { AgreementMap } from "@/components/agreement-map";
 import {
   api,
@@ -86,6 +87,18 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
       }
       setError(null);
     } catch (caught) {
+      if (
+        caught instanceof MeaningSyncApiError &&
+        [
+          "session_expired",
+          "access_required",
+          "access_invalid",
+          "access_expired",
+          "access_revoked",
+        ].includes(caught.code)
+      ) {
+        setSession(null);
+      }
       setError(
         caught instanceof Error
           ? caught.message
@@ -152,7 +165,7 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
 
   return (
     <main className="app-shell">
-      <LiveBrandBar trailing={<span className="guided-mode-note">Live · text only</span>} />
+      <LiveBrandBar trailing={<span className="guided-mode-note">Live · text or audio</span>} />
       <section className="guided-flow-page conversation-first-flow">
         <LiveProgress
           currentStage={presentation.stage}
@@ -179,6 +192,8 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
             saving={saving}
             onComposerRole={setComposerRole}
             onMessage={setMessage}
+            onSession={setSession}
+            accessToken={tokenFor(composerRole)}
             onSend={() => {
               const text = message.trim();
               if (text.length < 2) return;
@@ -361,6 +376,8 @@ function ConversationStep({
   saving,
   onComposerRole,
   onMessage,
+  onSession,
+  accessToken,
   onSend,
   onReady,
   onCompare,
@@ -372,10 +389,13 @@ function ConversationStep({
   saving: boolean;
   onComposerRole: (role: PartyRole) => void;
   onMessage: (value: string) => void;
+  onSession: (session: LiveSessionView) => void;
+  accessToken: string;
   onSend: () => void;
   onReady: (role: PartyRole, ready: boolean) => void;
   onCompare: () => void;
 }) {
+  const [inputMode, setInputMode] = useState<"type" | "speak">("type");
   const separate = session.participation_mode === "separate_devices";
   const canCompose = !separate || composerRole === session.viewer_role;
   const contributors = new Set(session.messages.map((item) => item.speaker_id));
@@ -401,28 +421,45 @@ function ConversationStep({
           <span>{focusTerm.summary}</span>
         </div>
       ) : null}
-      <ChatMessageList messages={session.messages.map((item) => ({ id: item.message_id, role: item.speaker_id as PartyRole, roleName: roleLabel(item.speaker_id as PartyRole), text: item.original_text, order: item.order, timestamp: item.timestamp }))} />
+      <ChatMessageList messages={session.messages.map((item) => ({ id: item.message_id, role: item.speaker_id as PartyRole, roleName: roleLabel(item.speaker_id as PartyRole), text: item.effective_text ?? item.original_text, order: item.order, timestamp: item.timestamp, inputSource: item.input_source ?? "text", rawTranscript: item.raw_transcript, correctedText: item.corrected_text }))} />
       {!separate ? (
         <div className="composer-role-tabs" aria-label="Choose who is speaking">
           {roles.map((role) => (
-            <button className={composerRole === role ? "active" : ""} type="button" key={role} onClick={() => onComposerRole(role)}>{roleLabel(role)}</button>
+            <button className={composerRole === role ? "active" : ""} type="button" key={role} onClick={() => { setInputMode("type"); onComposerRole(role); }}>{roleLabel(role)}</button>
           ))}
         </div>
       ) : null}
-      <div className="chat-composer">
-        <label htmlFor="conversation-message">Message as {roleLabel(composerRole)}</label>
-        <textarea
-          id="conversation-message"
-          rows={3}
-          maxLength={2000}
-          value={message}
-          disabled={!canCompose || saving}
-          onChange={(event) => onMessage(event.target.value)}
-          placeholder="Type your message…"
+      <fieldset className="input-mode-picker">
+        <legend>How would you like to contribute?</legend>
+        <button className={inputMode === "type" ? "active" : ""} type="button" aria-pressed={inputMode === "type"} onClick={() => setInputMode("type")}><strong>Type</strong><span>Send text messages.</span></button>
+        <button className={inputMode === "speak" ? "active" : ""} type="button" aria-pressed={inputMode === "speak"} disabled={!canCompose || saving} onClick={() => setInputMode("speak")}><strong>Speak</strong><span>Use your microphone and review each transcript before adding it.</span></button>
+      </fieldset>
+      {inputMode === "type" ? (
+        <div className="chat-composer">
+          <label htmlFor="conversation-message">Message as {roleLabel(composerRole)}</label>
+          <textarea
+            id="conversation-message"
+            rows={3}
+            maxLength={2000}
+            value={message}
+            disabled={!canCompose || saving}
+            onChange={(event) => onMessage(event.target.value)}
+            placeholder="Type your message…"
+          />
+          <button className="button secondary" type="button" disabled={!canCompose || saving || message.trim().length < 2} onClick={onSend}>Send message</button>
+          <small>{canCompose ? "Type at least two characters to send." : `Only ${roleLabel(session.viewer_role ?? composerRole)} can send from this device.`}</small>
+        </div>
+      ) : (
+        <LiveAudioComposer
+          key={`${session.id}-${composerRole}`}
+          session={session}
+          role={composerRole}
+          accessToken={accessToken}
+          disabled={!canCompose || saving || session.participant_readiness[composerRole]}
+          onSession={onSession}
+          onContinueWithText={() => setInputMode("type")}
         />
-        <button className="button secondary" type="button" disabled={!canCompose || saving || message.trim().length < 2} onClick={onSend}>Send message</button>
-        <small>{canCompose ? "Type at least two characters to send." : `Only ${roleLabel(session.viewer_role ?? composerRole)} can send from this device.`}</small>
-      </div>
+      )}
       <div className="readiness-grid">
         {roles.map((role) => {
           const ready = session.participant_readiness[role];

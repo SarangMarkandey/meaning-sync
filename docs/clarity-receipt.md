@@ -11,7 +11,7 @@ The receipt includes:
 - receipt/session/version IDs, issue time, and session start time;
 - creator role, participant roles, display labels, languages, and confirmation times;
 - selected session currency without conversion;
-- full evidence-bearing matching terms, retaining original stated currency;
+- full evidence-bearing matching terms, retaining original stated currency and audio machine/correction provenance;
 - conflicting/unresolved, one-sided, not-applicable, and not-discussed categories;
 - immutable agreement history and version provenance;
 - `fully_aligned` or `contains_unresolved_items` status;

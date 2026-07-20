@@ -37,6 +37,7 @@ from app.schemas.analysis import (
     AnalysisStatus,
     EvidenceReference,
     MeaningState,
+    MessageInputSource,
     ParticipantPosition,
     ParticipantTermStatus,
     PartyRole,
@@ -66,6 +67,9 @@ from app.schemas.workflow import (
     AgreementVersion,
     AgreementVersionChange,
     AnalyzeLiveSessionSubmission,
+    AudioConsent,
+    AudioConsentSubmission,
+    AudioTranscriptionConfiguration,
     ClarificationHistoryEntry,
     ClarificationWorkflowStatus,
     ConfirmationDecision,
@@ -74,6 +78,7 @@ from app.schemas.workflow import (
     ConfirmationSubmission,
     ConversationReentrySubmission,
     DraftStatementSubmission,
+    FinalizedAudioTranscriptSubmission,
     IssueReceiptSubmission,
     LiveClarityReceipt,
     LiveGuidanceAction,
@@ -141,12 +146,26 @@ class LiveSessionService:
         analyzer: AgreementAnalyzer,
         repository: LiveSessionRepository,
         clarification_attempt_limit: int = 3,
+        audio_configuration: AudioTranscriptionConfiguration | None = None,
     ) -> None:
         if clarification_attempt_limit < 1:
             raise ValueError("clarification attempt limit must be positive")
         self._analyzer = analyzer
         self._repository = repository
         self._clarification_attempt_limit = clarification_attempt_limit
+        self._audio_configuration = (
+            audio_configuration
+            or AudioTranscriptionConfiguration(
+                model="gpt-realtime-whisper",
+                consent_notice_version="audio-transcription-v1",
+                max_turn_duration_seconds=60,
+                max_session_duration_seconds_per_participant=600,
+                initialization_timeout_seconds=12,
+                idle_timeout_seconds=20,
+                max_transcript_length=2000,
+                max_concurrent_sessions_per_participant=1,
+            )
+        )
 
     def create(self, submission: LiveSessionCreate) -> LiveSessionView:
         session_id = _id("live")
@@ -249,6 +268,185 @@ class LiveSessionService:
                     timestamp=_now(),
                 )
             )
+            record.participant_readiness = {item: False for item in PartyRole}
+            self._invalidate_review(record)
+            self._invalidate_all_confirmations(record)
+            self._mark_processed(record, submission.request_id, digest)
+            return self._view(record)
+
+    def record_audio_consent(
+        self,
+        session_id: str,
+        role: PartyRole,
+        submission: AudioConsentSubmission,
+    ) -> LiveSessionView:
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
+            self._require_stage(record, LiveSessionStage.CONVERSATION_DRAFT)
+            digest = self._request_digest("audio-consent", role.value, submission)
+            if self._is_replay(record, submission.request_id, digest):
+                return self._view(record)
+            self._require_revision(record, transaction, submission.expected_revision)
+            if (
+                submission.notice_version
+                != self._audio_configuration.consent_notice_version
+            ):
+                raise WorkflowFailure(
+                    WorkflowErrorCode.INVALID_REQUEST,
+                    "The audio privacy notice has changed. Refresh and review "
+                    "it again.",
+                    status_code=422,
+                )
+            current = record.audio_consents.get(role)
+            if current is None or current.notice_version != submission.notice_version:
+                record.audio_consents[role] = AudioConsent(
+                    id=_id("audio-consent"),
+                    session_id=record.id,
+                    participant_role=role,
+                    notice_version=submission.notice_version,
+                    consented_at=_now(),
+                    request_id=submission.request_id,
+                )
+            self._mark_processed(record, submission.request_id, digest)
+            return self._view(record)
+
+    def authorize_transcription_initialization(
+        self,
+        session_id: str,
+        role: PartyRole,
+        *,
+        expected_revision: int,
+    ) -> tuple[str, AudioTranscriptionConfiguration]:
+        view, revision = self.get_with_revision(session_id)
+        if revision != expected_revision:
+            raise WorkflowFailure(
+                WorkflowErrorCode.CONCURRENT_UPDATE,
+                "The Live session changed. Refresh before starting the microphone.",
+                status_code=409,
+                retryable=True,
+            )
+        if view.stage != LiveSessionStage.CONVERSATION_DRAFT:
+            raise WorkflowFailure(
+                WorkflowErrorCode.INVALID_STATE,
+                "Microphone transcription is available only during Conversation.",
+                status_code=409,
+            )
+        if view.participant_readiness.get(role, False):
+            raise WorkflowFailure(
+                WorkflowErrorCode.INVALID_STATE,
+                "Select Keep talking before starting another spoken turn.",
+                status_code=409,
+            )
+        consent = view.audio_consents.get(role)
+        if (
+            consent is None
+            or consent.notice_version
+            != self._audio_configuration.consent_notice_version
+        ):
+            raise WorkflowFailure(
+                WorkflowErrorCode.AUDIO_CONSENT_REQUIRED,
+                "Review and accept the audio transcription notice first.",
+                status_code=409,
+            )
+        participant = next(item for item in view.participants if item.role == role)
+        return participant.language.value, self._audio_configuration.model_copy()
+
+    def add_audio_transcript(
+        self,
+        session_id: str,
+        role: PartyRole,
+        submission: FinalizedAudioTranscriptSubmission,
+    ) -> LiveSessionView:
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
+            self._require_stage(record, LiveSessionStage.CONVERSATION_DRAFT)
+            digest = self._request_digest("audio-transcript", role.value, submission)
+            if self._is_replay(record, submission.request_id, digest):
+                return self._view(record)
+            self._require_revision(record, transaction, submission.expected_revision)
+            if record.participant_readiness.get(role, False):
+                raise WorkflowFailure(
+                    WorkflowErrorCode.INVALID_STATE,
+                    "Select Keep talking before adding another spoken turn.",
+                    status_code=409,
+                )
+            consent = record.audio_consents.get(role)
+            if consent is None or consent.id != submission.consent_id:
+                raise WorkflowFailure(
+                    WorkflowErrorCode.AUDIO_CONSENT_REQUIRED,
+                    "This transcript does not reference the participant's "
+                    "current consent.",
+                    status_code=409,
+                )
+            if submission.transcription_model != self._audio_configuration.model:
+                raise WorkflowFailure(
+                    WorkflowErrorCode.INVALID_REQUEST,
+                    "The transcript model does not match this Live session.",
+                    status_code=422,
+                )
+            effective_text = submission.corrected_text or submission.raw_transcript
+            transcript_lengths = [len(submission.raw_transcript), len(effective_text)]
+            if submission.corrected_text:
+                transcript_lengths.append(len(submission.corrected_text))
+            if (
+                max(transcript_lengths)
+                > self._audio_configuration.max_transcript_length
+            ):
+                raise WorkflowFailure(
+                    WorkflowErrorCode.AUDIO_LIMIT_REACHED,
+                    "This transcript is too long. Shorten it or continue with text.",
+                    status_code=422,
+                )
+            if (
+                submission.duration_seconds
+                > self._audio_configuration.max_turn_duration_seconds
+            ):
+                raise WorkflowFailure(
+                    WorkflowErrorCode.AUDIO_LIMIT_REACHED,
+                    "This spoken turn exceeded the configured duration limit.",
+                    status_code=422,
+                )
+            total = record.audio_duration_seconds.get(role, 0.0)
+            if (
+                total + submission.duration_seconds
+                > self._audio_configuration.max_session_duration_seconds_per_participant
+            ):
+                raise WorkflowFailure(
+                    WorkflowErrorCode.AUDIO_LIMIT_REACHED,
+                    "This participant has reached the session audio limit. "
+                    "Continue with text.",
+                    status_code=422,
+                )
+            participant = next(
+                item for item in record.participants if item.role == role
+            )
+            if len(record.messages) >= 80:
+                raise WorkflowFailure(
+                    WorkflowErrorCode.INVALID_REQUEST,
+                    "This conversation has reached its message limit.",
+                    status_code=422,
+                )
+            record.messages.append(
+                AnalysisMessage(
+                    message_id=_id("message"),
+                    speaker_id=role.value,
+                    original_text=effective_text,
+                    original_language=participant.language,
+                    order=len(record.messages) + 1,
+                    timestamp=submission.completed_at,
+                    input_source=MessageInputSource.AUDIO_TRANSCRIPT,
+                    raw_transcript=submission.raw_transcript,
+                    corrected_text=submission.corrected_text,
+                    effective_text=effective_text,
+                    transcription_model=submission.transcription_model,
+                    transcription_request_id=submission.request_id,
+                    consent_id=consent.id,
+                    audio_started_at=submission.started_at,
+                    audio_completed_at=submission.completed_at,
+                    audio_duration_seconds=submission.duration_seconds,
+                )
+            )
+            record.audio_duration_seconds[role] = total + submission.duration_seconds
             record.participant_readiness = {item: False for item in PartyRole}
             self._invalidate_review(record)
             self._invalidate_all_confirmations(record)
@@ -1379,6 +1577,12 @@ class LiveSessionService:
             currency=record.currency,
             creator_role=record.creator_role,
             participant_readiness=dict(record.participant_readiness),
+            audio_consents={
+                role: _deep_copy(consent)
+                for role, consent in record.audio_consents.items()
+            },
+            audio_duration_seconds=dict(record.audio_duration_seconds),
+            audio_configuration=self._audio_configuration.model_copy(),
             conversation_reentry_item_key=record.conversation_reentry_item_key,
             agreement_versions=[_deep_copy(item) for item in record.versions],
             current_agreement_version_id=record.current_version_id,
@@ -1398,6 +1602,21 @@ class LiveSessionService:
             clarification_attempt_limit=self._clarification_attempt_limit,
             guidance=self._guidance(record),
         )
+
+    def _require_revision(
+        self,
+        record: _LiveSessionRecord,
+        transaction: LiveSessionTransaction,
+        expected_revision: int,
+    ) -> None:
+        if transaction.revision != expected_revision:
+            raise WorkflowFailure(
+                WorkflowErrorCode.CONCURRENT_UPDATE,
+                "The Live session changed in another request. Refresh and retry.",
+                status_code=409,
+                retryable=True,
+                current_agreement_version_id=record.current_version_id,
+            )
 
     def _guidance(self, record: _LiveSessionRecord) -> LiveWorkflowGuidance:
         version = self._current_version(record)

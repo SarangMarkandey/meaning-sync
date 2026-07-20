@@ -22,7 +22,9 @@ export function EvidenceDisclosure({ term }: { term: AgreementTerm }) {
         {term.evidence.map((reference) => (
           <li key={`${reference.source}-${reference.reference_id}`}>
             <span>{roleLabel(reference.role)}</span>
+            {reference.input_source === "audio_transcript" ? <small>Audio transcript{reference.corrected_text ? " · corrected by participant" : ""}</small> : null}
             <q>{reference.original_text}</q>
+            {reference.corrected_text && reference.raw_transcript ? <details><summary>Original machine transcript</summary><q>{reference.raw_transcript}</q></details> : null}
           </li>
         ))}
       </ul>

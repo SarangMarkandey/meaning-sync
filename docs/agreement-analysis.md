@@ -19,7 +19,7 @@ The UI renders Matches, Needs a decision, and Not discussed. Non-missing terms m
 
 Prompt `agreement-analysis-v4` treats participant text as untrusted, rejects invention/silence-based agreement, and separates atomic claims. FastAPI validates participant ownership, evidence, canonical keys, duplicates, and clarification ownership, then hydrates original evidence from the trusted request. Invalid core output is a controlled error; an unusable optional clarification yields a partial valid map.
 
-Every validated comparison creates an immutable internal snapshot. The visible Agreement Map number advances only when a SHA-256 semantic fingerprint changes. Wording, IDs, timestamps, and provider metadata do not advance it. Re-entering Conversation and adding text retains prior versions, clears readiness/reviews/confirmations, and requires another explicit comparison.
+Every validated comparison creates an immutable internal snapshot. The visible Agreement Map number advances only when a SHA-256 semantic fingerprint changes. Wording, IDs, timestamps, and provider metadata do not advance it. Re-entering Conversation and adding typed or finalized audio-transcript evidence retains prior versions, clears readiness/reviews/confirmations, and requires another explicit comparison. Analysis receives effective reviewed text; evidence retains machine transcript and any participant correction.
 
 ## Choice-Based Decisions
 

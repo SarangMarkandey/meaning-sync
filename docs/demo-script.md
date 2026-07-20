@@ -14,7 +14,7 @@
 
 1. Choose languages/currency, select either creator role, and choose **Use separate devices**.
 2. Show the QR/link without displaying its secret. Join once as the opposite generic role.
-3. Confirm both devices leave waiting automatically. Each role sends text and marks ready.
+3. Confirm both devices leave waiting automatically. Send one typed turn. Choose Speak on the other device, accept that role’s notice, use fake transcription, correct one word, and add the reviewed turn. Point out that raw audio is not saved.
 4. Show that only the creator can choose **Compare what we mean** after both have spoken/are ready.
 5. Walk through one private decision and separate confirmations; request a change to demonstrate Conversation re-entry/invalidation.
 6. Show the immutable receipt on either authorized device.

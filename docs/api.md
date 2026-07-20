@@ -11,8 +11,18 @@ Every Live endpoint except creation and invitation exchange requires `Authorizat
 - `POST /api/v1/live/sessions/{id}/draft-statements` appends a server-owned message for the bearer role before analysis.
 - `POST /api/v1/live/sessions/{id}/readiness` records the bearer role’s readiness; both roles must be ready before comparison.
 - `POST /api/v1/live/sessions/{id}/conversation/reentry` returns an item to Conversation and invalidates readiness/review/confirmation state.
+- `POST /api/v1/live/sessions/{id}/audio-consent` records accepted, role-bound, notice-versioned consent with `expected_revision` and `request_id`.
+- `POST /api/v1/live/sessions/{id}/transcription-session` accepts authorized `application/sdp` and returns only `application/sdp`; it creates no evidence.
+- `POST /api/v1/live/sessions/{id}/transcription-session/end` releases the bearer role’s transient concurrency lease after stop, cancel, failure, or navigation.
+- `POST /api/v1/live/sessions/{id}/audio-transcripts` appends one reviewed transcript with raw/corrected/effective provenance, consent, model, timing, revision, and request ID.
 
 Session views include `revision`, `participation_mode`, `viewer_role`, and participant presence. `GET` also returns the revision as `ETag`. Secrets never belong in query parameters or ordinary session views.
+
+## Live Audio Transcription
+
+Speak is available only in `conversation_draft`, before that bearer role marks ready. Consent must match the session, role, and configured notice version. FastAPI initializes a transcription-only OpenAI Realtime WebRTC call using `gpt-realtime-whisper` by default and the participant language. The standard backend key is never returned.
+
+Initialization does not hold a SQL transaction or persist SDP, audio, partial deltas, connection state, or credentials. Only `/audio-transcripts` mutates the existing ledger. It preserves immutable machine transcript, optional participant correction, effective analysis text, and provenance; then clears readiness and stale review/confirmation state. Turn/session duration, transcript length, initialization/idle timeout, and concurrency limits return controlled errors with text fallback.
 
 All operations are JSON under `/api/v1/live/sessions`. FastAPI owns lifecycle state, the active participant, version order, and receipt readiness. `GET /health` remains the service health check. `POST /api/v1/agreements/analyze` remains the standalone analysis contract, but the product workflow uses session endpoints.
 

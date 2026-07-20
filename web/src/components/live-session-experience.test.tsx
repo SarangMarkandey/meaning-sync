@@ -91,6 +91,33 @@ describe("LiveSessionExperience conversation-first flow", () => {
     expect(screen.queryByText("Homeowner")).not.toBeInTheDocument();
   });
 
+  it("switches between Type and Speak without leaving Conversation", async () => {
+    vi.spyOn(api, "getLiveSession").mockResolvedValue(conversationSession());
+    render(<LiveSessionExperience sessionId="live-guided-v5" />);
+    expect(await screen.findByLabelText("Message as Customer")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /SpeakUse your microphone/ }));
+    expect(screen.getByText(/send your speech to OpenAI/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Continue with text instead" }));
+    expect(screen.getByLabelText("Message as Customer")).toBeVisible();
+  });
+
+  it("marks corrected audio messages without hiding the raw transcript", async () => {
+    const session = conversationSession();
+    session.messages[0] = {
+      ...session.messages[0],
+      original_text: "Please repair the fan and both switches.",
+      effective_text: "Please repair the fan and both switches.",
+      input_source: "audio_transcript",
+      raw_transcript: "Please repair the fan and boat switches.",
+      corrected_text: "Please repair the fan and both switches.",
+    };
+    vi.spyOn(api, "getLiveSession").mockResolvedValue(session);
+    render(<LiveSessionExperience sessionId="live-guided-v5" />);
+    expect(await screen.findByText(/Audio transcript · Corrected/)).toBeVisible();
+    fireEvent.click(screen.getByText("See original machine transcript"));
+    expect(screen.getByText("Please repair the fan and boat switches.")).toBeVisible();
+  });
+
   it("requires both readiness flags before the creator can compare", async () => {
     const session = conversationSession();
     vi.spyOn(api, "getLiveSession").mockResolvedValue(session);

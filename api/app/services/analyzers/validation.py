@@ -351,6 +351,11 @@ def build_analysis_response(
                 original_language=message.original_language,
                 order=message.order,
                 timestamp=message.timestamp,
+                input_source=message.input_source,
+                raw_transcript=message.raw_transcript,
+                corrected_text=message.corrected_text,
+                transcription_model=message.transcription_model,
+                consent_id=message.consent_id,
             )
             for message in evidence_messages
         ]
