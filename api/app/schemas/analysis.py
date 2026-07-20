@@ -26,6 +26,11 @@ class LanguageCode(StrEnum):
     HINDI = "hi"
 
 
+class MessageInputSource(StrEnum):
+    TEXT = "text"
+    AUDIO_TRANSCRIPT = "audio_transcript"
+
+
 class AgreementTopic(StrEnum):
     SCOPE = "scope"
     PRICE = "price"
@@ -104,6 +109,43 @@ class AnalysisMessage(StrictModel):
     original_language: LanguageCode
     order: int = Field(ge=1, le=40)
     timestamp: datetime
+    input_source: MessageInputSource = MessageInputSource.TEXT
+    raw_transcript: str | None = Field(default=None, min_length=2, max_length=2000)
+    corrected_text: str | None = Field(default=None, min_length=2, max_length=2000)
+    effective_text: str | None = Field(default=None, min_length=2, max_length=2000)
+    transcription_model: str | None = Field(default=None, min_length=1, max_length=120)
+    transcription_request_id: Identifier | None = None
+    consent_id: Identifier | None = None
+    audio_started_at: datetime | None = None
+    audio_completed_at: datetime | None = None
+    audio_duration_seconds: float | None = Field(default=None, gt=0, le=3600)
+
+    @model_validator(mode="after")
+    def validate_provenance(self) -> AnalysisMessage:
+        effective = self.corrected_text or self.raw_transcript or self.original_text
+        if self.effective_text is None:
+            self.effective_text = effective
+        if self.original_text != effective or self.effective_text != effective:
+            raise ValueError("original and effective text must match the analyzed text")
+        audio_fields = (
+            self.raw_transcript,
+            self.transcription_model,
+            self.transcription_request_id,
+            self.consent_id,
+            self.audio_started_at,
+            self.audio_completed_at,
+            self.audio_duration_seconds,
+        )
+        if self.input_source == MessageInputSource.TEXT:
+            if self.corrected_text is not None or any(
+                item is not None for item in audio_fields
+            ):
+                raise ValueError("typed messages cannot contain audio provenance")
+        elif any(item is None for item in audio_fields):
+            raise ValueError("audio transcripts require complete provenance")
+        elif self.audio_completed_at <= self.audio_started_at:
+            raise ValueError("audio completion must follow its start")
+        return self
 
 
 class ParticipantPosition(StrictModel):
@@ -124,6 +166,11 @@ class EvidenceReference(StrictModel):
     original_language: LanguageCode
     order: int | None = Field(default=None, ge=1, le=40)
     timestamp: datetime | None = None
+    input_source: MessageInputSource = MessageInputSource.TEXT
+    raw_transcript: str | None = Field(default=None, min_length=2, max_length=2000)
+    corrected_text: str | None = Field(default=None, min_length=2, max_length=2000)
+    transcription_model: str | None = Field(default=None, min_length=1, max_length=120)
+    consent_id: Identifier | None = None
 
     @model_validator(mode="after")
     def transcript_evidence_requires_message(self) -> EvidenceReference:

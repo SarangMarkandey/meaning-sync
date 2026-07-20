@@ -14,7 +14,7 @@ Demo and Live show exactly six steps:
 | --- | --- | --- |
 | Preferences | Choose each person’s language and session currency. | English is implemented. Live supports INR/USD/EUR; Demo is fixed to English/INR. Currency metadata never converts original evidence. |
 | Participation | Choose Customer or Service provider and shared or separate devices. | Either role may create. A separate-device invite always belongs to the opposite role. |
-| Conversation | Exchange role-scoped text messages and independently mark ready. | Both people must speak and be ready before the creator can compare. New text clears readiness and confirmations. Messages never trigger analysis. |
+| Conversation | Choose Type or Speak per turn, review every transcript, and independently mark ready. | Both people must contribute and be ready before comparison. New text or finalized transcript clears readiness and confirmations. Messages never trigger analysis. |
 | Check understanding | Review Matches, Needs a decision, and Not discussed. | Non-missing items show original evidence. Only conflicts/one-sided items need private choices. The first choice stays hidden. Missing topics are optional. |
 | Confirm | Each person confirms the same current version or requests a change. | A change returns to Conversation for the selected item and invalidates current confirmations. |
 | Receipt | Review the immutable outcome. | Matching, unresolved, one-sided, and missing items all remain visible. The receipt is not a legal contract. |
@@ -29,7 +29,7 @@ Every successful analysis is retained as an immutable internal snapshot. A user-
 
 ## Participation and Privacy
 
-Shared-device mode uses visible role switching and handoff; it is not authentication. Separate-device mode uses expiring, role-bound bearer credentials, a single-use invitation, local QR rendering, URL-fragment removal, and revision-aware polling. The invited participant joins with one action, and both devices leave the waiting screen automatically after connection. Neither path verifies identity or proves consent or comprehension.
+Shared-device mode uses visible role switching and private handoff; it is not authentication. Audio is attributed to that explicit active role, never diarization. Separate-device mode uses expiring, role-bound bearer credentials and captures only the local bearer role; it is not an audio call. Before microphone access, each participant records session/role/notice-version consent. Every finalized transcript is reviewed, can be corrected without replacing machine text, and enters the same evidence ledger. MeaningSync stores no raw audio.
 
 ## Receipt Content
 
@@ -37,6 +37,6 @@ Two separate current-version confirmations are required. The receipt records rol
 
 ## Status
 
-**Implemented:** deterministic English/INR Demo; conversation-first shared/separate Live; creator-selectable generic roles; INR/USD/EUR metadata; readiness-gated explicit analysis; private choice comparison; immutable versions; separate confirmation; durable sessions/receipts; restart recovery; expiry; optimistic concurrency; and persistent idempotency.
+**Implemented:** deterministic English/INR Demo; conversation-first shared/separate Live; consent-gated reviewed WebRTC transcripts with typed fallback; creator-selectable generic roles; INR/USD/EUR metadata; readiness-gated analysis; private choices; immutable versions; separate confirmation; durable sessions/receipts; restart recovery; expiry; optimistic concurrency; and persistent idempotency.
 
-**Planned:** moderated usability validation, Hindi and translation, audio with explicit recording consent, automated cleanup/backups/deletion, and privacy-preserving observability. MeaningSync records stated meaning; it does not provide legal advice or create an enforceable agreement.
+**Planned:** moderated usability validation, Hindi and translation, automated cleanup/backups/deletion, and privacy-preserving observability. MeaningSync records stated meaning; it does not provide legal advice or create an enforceable agreement.

@@ -103,11 +103,18 @@ export function AgreementMap({
                               key={`${reference.source}-${reference.reference_id}`}
                             >
                               <span>
-                                {reference.speaker_name} · original {" · "}
+                                {reference.speaker_name}
+                                {reference.input_source === "audio_transcript" ? " · audio transcript" : " · original"} {" · "}
                                 {languageNames[reference.original_language]}
                                 {reference.order ? ` · message ${reference.order}` : ""}
                               </span>
                               <q>{reference.original_text}</q>
+                              {reference.corrected_text && reference.raw_transcript ? (
+                                <details className="raw-transcript">
+                                  <summary>Original machine transcript</summary>
+                                  <q>{reference.raw_transcript}</q>
+                                </details>
+                              ) : null}
                               {reference.timestamp && (
                                 <time dateTime={reference.timestamp}>
                                   {new Date(reference.timestamp).toLocaleString()}

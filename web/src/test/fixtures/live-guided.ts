@@ -180,6 +180,19 @@ export function guidedV5Session(
     currency: "INR",
     creator_role: "hirer",
     participant_readiness: { hirer: false, worker: false },
+    revision: 1,
+    audio_consents: {},
+    audio_duration_seconds: { hirer: 0, worker: 0 },
+    audio_configuration: {
+      model: "gpt-realtime-whisper",
+      consent_notice_version: "audio-transcription-v1",
+      max_turn_duration_seconds: 60,
+      max_session_duration_seconds_per_participant: 600,
+      initialization_timeout_seconds: 12,
+      idle_timeout_seconds: 20,
+      max_transcript_length: 2000,
+      max_concurrent_sessions_per_participant: 1,
+    },
     conversation_reentry_item_key: null,
     agreement_versions: [
       {

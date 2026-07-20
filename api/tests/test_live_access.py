@@ -13,6 +13,10 @@ from app.main import app, lifespan
 from app.repositories.live_access import LiveAccessRow, LiveInvitationRow
 from app.schemas.workflow import LiveParticipationMode
 from app.services.live_access import AccessFailure
+from app.services.transcriptions import (
+    FakeRealtimeSessionInitializer,
+    RealtimeTranscriptionService,
+)
 from tests.test_live_workflow import create_submission
 
 
@@ -53,6 +57,83 @@ def separate_submission() -> dict:
 
 def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.anyio
+async def test_realtime_initialization_is_role_scoped_and_returns_only_sdp(
+    access_database_url: str,
+) -> None:
+    submission = create_submission().model_copy(update={"messages": []})
+    async with api_client() as client:
+        app.state.realtime_transcription_service = RealtimeTranscriptionService(
+            FakeRealtimeSessionInitializer(), max_concurrent_per_participant=1
+        )
+        created = await client.post(
+            "/api/v1/live/sessions", json=submission.model_dump(mode="json")
+        )
+        body = created.json()
+        session_id = body["id"]
+        tokens = {
+            item["role"]: item["access_token"] for item in body["access_credentials"]
+        }
+        init_headers = {
+            **bearer(tokens["hirer"]),
+            "Content-Type": "application/sdp",
+            "X-MeaningSync-Revision": "1",
+            "X-Request-ID": "init-before-consent",
+        }
+        missing = await client.post(
+            f"/api/v1/live/sessions/{session_id}/transcription-session",
+            headers=init_headers,
+            content="v=0\r\ns=offer\r\n",
+        )
+        assert missing.status_code == 409
+        assert missing.json()["detail"]["code"] == "audio_consent_required"
+
+        consented = await client.post(
+            f"/api/v1/live/sessions/{session_id}/audio-consent",
+            headers=bearer(tokens["hirer"]),
+            json={
+                "accepted": True,
+                "notice_version": "audio-transcription-v1",
+                "expected_revision": 1,
+                "request_id": "hirer-audio-consent",
+            },
+        )
+        assert consented.status_code == 200
+        assert consented.json()["audio_consents"]["hirer"]["participant_role"] == (
+            "hirer"
+        )
+
+        initialized = await client.post(
+            f"/api/v1/live/sessions/{session_id}/transcription-session",
+            headers={
+                **bearer(tokens["hirer"]),
+                "Content-Type": "application/sdp",
+                "X-MeaningSync-Revision": "2",
+                "X-Request-ID": "hirer-realtime-init",
+            },
+            content="v=0\r\ns=offer\r\n",
+        )
+        assert initialized.status_code == 200
+        assert initialized.headers["content-type"].startswith("application/sdp")
+        assert initialized.text.startswith("v=0")
+        assert initialized.text.endswith("\r\n")
+        assert "key" not in initialized.text.lower()
+        assert "token" not in initialized.text.lower()
+
+        worker = await client.post(
+            f"/api/v1/live/sessions/{session_id}/transcription-session",
+            headers={
+                **bearer(tokens["worker"]),
+                "Content-Type": "application/sdp",
+                "X-MeaningSync-Revision": "2",
+                "X-Request-ID": "worker-realtime-init",
+            },
+            content="v=0\r\ns=offer\r\n",
+        )
+        assert worker.status_code == 409
+        assert worker.json()["detail"]["code"] == "audio_consent_required"
 
 
 @pytest.mark.anyio

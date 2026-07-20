@@ -7,6 +7,9 @@ export type ConversationDisplayMessage = {
   text: string;
   order: number;
   timestamp?: string | null;
+  inputSource?: "text" | "audio_transcript";
+  rawTranscript?: string | null;
+  correctedText?: string | null;
 };
 
 export function ConversationGuide() {
@@ -36,7 +39,16 @@ export function ChatMessageList({
       {messages.length ? messages.map((message) => (
         <article className={`chat-bubble ${message.role}`} key={message.id}>
           <span>{message.roleName}</span>
+          {message.inputSource === "audio_transcript" ? (
+            <small className="audio-provenance">Audio transcript{message.correctedText ? " · Corrected after transcription" : ""}</small>
+          ) : null}
           <p>{message.text}</p>
+          {message.inputSource === "audio_transcript" && message.correctedText && message.rawTranscript ? (
+            <details className="raw-transcript">
+              <summary>See original machine transcript</summary>
+              <q>{message.rawTranscript}</q>
+            </details>
+          ) : null}
           <time dateTime={message.timestamp ?? undefined}>
             Message {message.order}
             {message.timestamp

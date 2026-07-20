@@ -131,6 +131,9 @@ class WorkflowErrorCode(StrEnum):
     INVITATION_EXPIRED = "invitation_expired"
     INVITATION_USED = "invitation_used"
     INVITATION_REVOKED = "invitation_revoked"
+    AUDIO_CONSENT_REQUIRED = "audio_consent_required"
+    AUDIO_LIMIT_REACHED = "audio_limit_reached"
+    TRANSCRIPTION_UNAVAILABLE = "transcription_unavailable"
 
 
 class WorkflowErrorDetail(StrictModel):
@@ -197,6 +200,26 @@ class ParticipantPresence(StrictModel):
     role: PartyRole
     status: Literal["waiting", "connected", "offline"]
     last_seen_at: datetime | None = None
+
+
+class AudioConsent(FrozenWorkflowModel):
+    id: Identifier
+    session_id: Identifier
+    participant_role: PartyRole
+    notice_version: str = Field(min_length=1, max_length=80)
+    consented_at: datetime
+    request_id: Identifier
+
+
+class AudioTranscriptionConfiguration(StrictModel):
+    model: str = Field(min_length=1, max_length=120)
+    consent_notice_version: str = Field(min_length=1, max_length=80)
+    max_turn_duration_seconds: int = Field(ge=5, le=3600)
+    max_session_duration_seconds_per_participant: int = Field(ge=5, le=86400)
+    initialization_timeout_seconds: float = Field(gt=0, le=120)
+    idle_timeout_seconds: int = Field(ge=5, le=600)
+    max_transcript_length: int = Field(ge=2, le=20000)
+    max_concurrent_sessions_per_participant: int = Field(ge=1, le=5)
 
 
 class AgreementVersionChange(FrozenWorkflowModel):
@@ -374,6 +397,9 @@ class LiveSessionView(StrictModel):
     conversation_reentry_item_key: Identifier | None = None
     viewer_role: PartyRole | None = None
     participant_presence: list[ParticipantPresence] = Field(default_factory=list)
+    audio_consents: dict[PartyRole, AudioConsent] = Field(default_factory=dict)
+    audio_duration_seconds: dict[PartyRole, float] = Field(default_factory=dict)
+    audio_configuration: AudioTranscriptionConfiguration
     agreement_versions: list[AgreementVersion] = Field(default_factory=list)
     current_agreement_version_id: Identifier | None = None
     questions: list[UnderstandingQuestion] = Field(default_factory=list)
@@ -407,6 +433,37 @@ class LiveSessionCreateResult(LiveSessionView):
 class DraftStatementSubmission(StrictModel):
     original_text: str = Field(min_length=2, max_length=2000)
     request_id: Identifier
+
+
+class AudioConsentSubmission(StrictModel):
+    accepted: bool
+    notice_version: str = Field(min_length=1, max_length=80)
+    expected_revision: int = Field(ge=1)
+    request_id: Identifier
+
+    @model_validator(mode="after")
+    def require_acceptance(self) -> AudioConsentSubmission:
+        if not self.accepted:
+            raise ValueError("audio transcription consent must be accepted")
+        return self
+
+
+class FinalizedAudioTranscriptSubmission(StrictModel):
+    raw_transcript: str = Field(min_length=2, max_length=20000)
+    corrected_text: str | None = Field(default=None, min_length=2, max_length=20000)
+    started_at: datetime
+    completed_at: datetime
+    duration_seconds: float = Field(gt=0, le=3600)
+    transcription_model: str = Field(min_length=1, max_length=120)
+    consent_id: Identifier
+    expected_revision: int = Field(ge=1)
+    request_id: Identifier
+
+    @model_validator(mode="after")
+    def validate_timing(self) -> FinalizedAudioTranscriptSubmission:
+        if self.completed_at <= self.started_at:
+            raise ValueError("audio completion must follow its start")
+        return self
 
 
 class ParticipantReadinessSubmission(StrictModel):

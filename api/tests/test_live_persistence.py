@@ -28,6 +28,7 @@ from app.schemas.workflow import (
     WorkflowErrorCode,
 )
 from app.services.live_sessions import LiveSessionService, WorkflowFailure
+from tests.test_live_audio import consent, transcript_submission
 from tests.test_live_workflow import (
     FixtureAnalyzer,
     active_question,
@@ -60,8 +61,9 @@ def workflow(database_url: str, *, analyzer=None) -> LiveSessionService:
     )
 
 
-def test_state_v2_payload_upgrades_with_conversation_defaults(
-    database_url: str,
+@pytest.mark.parametrize("legacy_version", [2, 3])
+def test_legacy_state_payload_upgrades_with_audio_defaults(
+    database_url: str, legacy_version: int
 ) -> None:
     service = workflow(database_url)
     created = service.create(create_submission())
@@ -71,7 +73,7 @@ def test_state_v2_payload_upgrades_with_conversation_defaults(
         payload = connection.execute(
             select(LiveSessionRow.state_json).where(LiveSessionRow.id == created.id)
         ).scalar_one()
-        payload["state_schema_version"] = 2
+        payload["state_schema_version"] = legacy_version
         for field in (
             "currency",
             "creator_role",
@@ -82,12 +84,12 @@ def test_state_v2_payload_upgrades_with_conversation_defaults(
         connection.execute(
             update(LiveSessionRow)
             .where(LiveSessionRow.id == created.id)
-            .values(state_schema_version=2, state_json=payload)
+            .values(state_schema_version=legacy_version, state_json=payload)
         )
     engine.dispose()
 
     recovered = repository(database_url).load(created.id).state
-    assert recovered.state_schema_version == 3
+    assert recovered.state_schema_version == 4
     assert recovered.currency == CurrencyCode.INR
     assert recovered.creator_role == PartyRole.HIRER
     assert recovered.participant_readiness == {
@@ -95,6 +97,11 @@ def test_state_v2_payload_upgrades_with_conversation_defaults(
         PartyRole.WORKER: False,
     }
     assert recovered.conversation_reentry_item_key is None
+    assert recovered.audio_consents == {}
+    assert recovered.audio_duration_seconds == {
+        PartyRole.HIRER: 0.0,
+        PartyRole.WORKER: 0.0,
+    }
 
 
 @pytest.mark.anyio
@@ -142,6 +149,33 @@ async def test_durable_session_survives_new_repository_and_service(
     recovered = second.get(created.id)
     assert recovered == analyzed
     assert recovered.stage == LiveSessionStage.NEEDS_CLARIFICATION
+
+
+def test_audio_consent_and_finalized_transcript_survive_restart(
+    database_url: str,
+) -> None:
+    first = workflow(database_url)
+    created = first.create(create_submission().model_copy(update={"messages": []}))
+    consent(first, created.id, PartyRole.HIRER)
+    first.add_audio_transcript(
+        created.id,
+        PartyRole.HIRER,
+        transcript_submission(first, created.id, PartyRole.HIRER),
+    )
+    first._repository.close()
+
+    second = workflow(database_url)
+    recovered = second.get(created.id)
+    assert recovered.audio_consents[PartyRole.HIRER].notice_version == (
+        "audio-transcription-v1"
+    )
+    assert recovered.messages[0].raw_transcript == (
+        "The labour price is twelve hundred rupees."
+    )
+    assert recovered.messages[0].corrected_text == "The labour price is ₹1,200."
+    persisted = second._repository.load(created.id).state.model_dump(mode="json")
+    assert "sdp" not in str(persisted).lower()
+    assert "raw_audio" not in str(persisted).lower()
 
 
 @pytest.mark.anyio

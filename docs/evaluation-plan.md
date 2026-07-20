@@ -15,10 +15,11 @@ Workflow coverage must assert:
 - hidden first private choice, compatible resolution, different-choice non-repetition, and optional missing topics;
 - no mandatory teach-back/minimum question count;
 - two current-version confirmations, Conversation re-entry, and invalidation after change;
-- durable state-v3 migration, restart recovery, idempotency, optimistic conflicts, expiry, and stable receipt hash;
+- durable state-v4 migration from v3, restart recovery, idempotency, optimistic conflicts, expiry, and stable receipt hash;
+- role/version consent before microphone access; fake WebRTC initialization; transcript provenance, limits, cleanup, and text fallback;
 - receipt preservation of roles, languages, session/evidence currency, times, history, unresolved/missing items, and disclaimer.
 
-Frontend tests cover Preferences/Participation, one-action join and automatic waiting transition, conversation/chat readiness, accessible decision controls, separate confirmation, loading/error/empty states, and deterministic Demo parity. Browser verification checks 1440×900, 1024×768, and 390×844 for overflow, clipping, focus, console/hydration errors, and usable primary actions.
+Frontend tests cover Preferences/Participation, one-action join, conversation readiness, Type/Speak consent, mocked media/WebRTC lifecycle, transcript review/correction, accessible decisions, separate confirmation, failures, and deterministic Demo parity. Browser verification checks 1440×900, 1024×768, and 390×844 for overflow, clipping, focus, console/hydration errors, and usable primary actions.
 
 ## Paid Evaluation
 
@@ -29,6 +30,8 @@ RUN_OPENAI_INTEGRATION=1 pytest tests/test_evaluations.py
 ```
 
 It requires an authorized key and consumes credits. Routine verification must not run it. Record any authorized run’s model, prompt version, date, and reviewed semantic deltas in `BUILD_LOG.md`.
+
+Realtime initialization has a separate disabled gate: `RUN_OPENAI_TRANSCRIPTION_INTEGRATION=1`, `OPENAI_API_KEY`, and a valid `OPENAI_REALTIME_TEST_SDP`. It must never be enabled in routine CI or local verification.
 
 ## Planned
 

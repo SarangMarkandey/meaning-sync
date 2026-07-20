@@ -11,10 +11,12 @@ from app.schemas.workflow import (
     AdditionalStatementsSubmission,
     AgreementVersion,
     AnalyzeLiveSessionSubmission,
+    AudioConsentSubmission,
     ConfirmationStatusView,
     ConfirmationSubmission,
     ConversationReentrySubmission,
     DraftStatementSubmission,
+    FinalizedAudioTranscriptSubmission,
     IssueReceiptSubmission,
     LiveClarityReceipt,
     LiveInvitationExchange,
@@ -35,6 +37,10 @@ from app.schemas.workflow import (
 from app.services.analyzers import AnalysisFailure
 from app.services.live_access import AccessContext, AccessFailure, LiveAccessService
 from app.services.live_sessions import LiveSessionService, WorkflowFailure
+from app.services.transcriptions import (
+    RealtimeTranscriptionService,
+    TranscriptionInitializationFailure,
+)
 
 router = APIRouter(prefix="/api/v1/live/sessions", tags=["live sessions"])
 invitation_router = APIRouter(prefix="/api/v1/live/invitations", tags=["live sessions"])
@@ -49,6 +55,15 @@ async def get_live_session_service(request: Request) -> LiveSessionService:
 
 Service = Annotated[LiveSessionService, Depends(get_live_session_service)]
 Authorization = Annotated[str | None, Header(alias="Authorization")]
+
+
+def get_realtime_transcription_service(
+    request: Request,
+) -> RealtimeTranscriptionService:
+    service = getattr(request.app.state, "realtime_transcription_service", None)
+    if service is None:
+        raise RuntimeError("Realtime transcription service is not initialized")
+    return service
 
 
 def get_live_access_service(request: Request) -> LiveAccessService:
@@ -239,6 +254,154 @@ async def add_draft_statement(
         context = _authorize(request, authorization, session_id)
         service.add_draft_statement(session_id, context.role, submission)
         return _scoped_view(request, service, session_id, context)
+    except WorkflowFailure as exc:
+        raise _workflow_error(exc) from exc
+
+
+@router.post(
+    "/{session_id}/audio-consent",
+    response_model=LiveSessionView,
+    responses=ERROR_RESPONSES,
+)
+async def record_audio_consent(
+    session_id: str,
+    submission: AudioConsentSubmission,
+    service: Service,
+    request: Request,
+    authorization: Authorization = None,
+) -> LiveSessionView:
+    try:
+        context = _authorize(request, authorization, session_id)
+        service.record_audio_consent(session_id, context.role, submission)
+        return _scoped_view(request, service, session_id, context)
+    except WorkflowFailure as exc:
+        raise _workflow_error(exc) from exc
+
+
+@router.post(
+    "/{session_id}/transcription-session",
+    response_class=Response,
+    responses=ERROR_RESPONSES,
+)
+async def initialize_transcription_session(
+    session_id: str,
+    request: Request,
+    service: Service,
+    expected_revision: Annotated[int, Header(alias="X-MeaningSync-Revision", ge=1)],
+    request_id: Annotated[
+        str, Header(alias="X-Request-ID", min_length=1, max_length=80)
+    ],
+    authorization: Authorization = None,
+) -> Response:
+    del request_id
+    try:
+        context = _authorize(request, authorization, session_id)
+        language, configuration = service.authorize_transcription_initialization(
+            session_id,
+            context.role,
+            expected_revision=expected_revision,
+        )
+        content_type = request.headers.get("content-type", "").split(";", 1)[0]
+        if content_type != "application/sdp":
+            raise WorkflowFailure(
+                WorkflowErrorCode.INVALID_REQUEST,
+                "Realtime initialization requires an application/sdp offer.",
+                status_code=422,
+            )
+        raw_offer = await request.body()
+        if len(raw_offer) > 200_000:
+            raise WorkflowFailure(
+                WorkflowErrorCode.INVALID_REQUEST,
+                "The WebRTC offer is too large.",
+                status_code=422,
+            )
+        try:
+            offer = raw_offer.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise WorkflowFailure(
+                WorkflowErrorCode.INVALID_REQUEST,
+                "The WebRTC offer is invalid.",
+                status_code=422,
+            ) from exc
+        if not offer.strip().startswith("v=0"):
+            raise WorkflowFailure(
+                WorkflowErrorCode.INVALID_REQUEST,
+                "The WebRTC offer is invalid.",
+                status_code=422,
+            )
+        answer = await get_realtime_transcription_service(request).initialize(
+            session_id=session_id,
+            role=context.role.value,
+            sdp=offer,
+            model=configuration.model,
+            language=language,
+            timeout_seconds=configuration.initialization_timeout_seconds,
+        )
+        return Response(
+            content=answer,
+            media_type="application/sdp",
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
+    except WorkflowFailure as exc:
+        raise _workflow_error(exc) from exc
+    except TranscriptionInitializationFailure as exc:
+        raise _workflow_error(
+            WorkflowFailure(
+                WorkflowErrorCode.TRANSCRIPTION_UNAVAILABLE,
+                str(exc),
+                status_code=503,
+                retryable=True,
+            )
+        ) from exc
+
+
+@router.post(
+    "/{session_id}/audio-transcripts",
+    response_model=LiveSessionView,
+    responses=ERROR_RESPONSES,
+)
+async def add_audio_transcript(
+    session_id: str,
+    submission: FinalizedAudioTranscriptSubmission,
+    service: Service,
+    request: Request,
+    authorization: Authorization = None,
+) -> LiveSessionView:
+    try:
+        context = _authorize(request, authorization, session_id)
+        service.add_audio_transcript(session_id, context.role, submission)
+        await get_realtime_transcription_service(request).release(
+            session_id=session_id, role=context.role.value
+        )
+        return _scoped_view(request, service, session_id, context)
+    except WorkflowFailure as exc:
+        raise _workflow_error(exc) from exc
+
+
+@router.post(
+    "/{session_id}/transcription-session/end",
+    status_code=204,
+    responses=ERROR_RESPONSES,
+)
+async def end_transcription_session(
+    session_id: str,
+    service: Service,
+    request: Request,
+    authorization: Authorization = None,
+) -> Response:
+    try:
+        context = _authorize(request, authorization, session_id)
+        view = service.get(session_id)
+        if view.stage.value != "conversation_draft":
+            raise WorkflowFailure(
+                WorkflowErrorCode.INVALID_STATE,
+                "Microphone transcription is available only during Conversation.",
+                status_code=409,
+            )
+        await get_realtime_transcription_service(request).release(
+            session_id=session_id, role=context.role.value
+        )
+        return Response(status_code=204)
     except WorkflowFailure as exc:
         raise _workflow_error(exc) from exc
 

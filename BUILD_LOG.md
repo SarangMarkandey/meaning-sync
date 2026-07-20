@@ -312,3 +312,30 @@ Verification:
 - `npm run type-check`: passed.
 - `npm test -- --run`: 39 passed across 13 files.
 - `npm run build`: passed with Next.js 16.2.10 and all 9 routes generated.
+
+## Live Audio Conversation and Realtime Transcription
+
+**Date:** 2026-07-19
+
+- Added Type/Speak selection inside the existing Live Conversation step while preserving typed messages, the six visible steps, deterministic Demo behavior, readiness, polling, joining, choices, confirmation, and receipt.
+- Added independently persisted, role/session/notice-version consent before microphone access and explicit shared-device attribution or separate-device bearer attribution.
+- Added backend-only unified WebRTC initialization for transcription-only OpenAI Realtime sessions, with configurable `gpt-realtime-whisper`, language hint, turn/session duration, initialization/idle timeout, transcript length, and overlapping-initializer limits.
+- Added mandatory transcript review, correction without replacing the machine transcript, re-record/cancel controls, and one chronological text/audio ledger. Agreement analysis uses reviewed effective text; agreement evidence and receipts retain raw/correction provenance.
+- Advanced durable sessions to `state-v4` with v1/v2/v3 upgrade defaults. Consent, duration usage, and finalized transcript provenance survive restart; audio, SDP, partial deltas, media objects, and credentials are never persisted.
+- Added deterministic fake/failure initialization boundaries, backend lifecycle/persistence/authorization/provenance tests, mocked media/WebRTC frontend tests, secure-context and text-fallback behavior, and resource cleanup on stop, role/mode change, failure, and unmount.
+
+Final verification results:
+
+- `ruff format --check .` and `ruff check .`: passed across 55 Python files. The complete backend collection contained 114 tests: 101 passed and 13 opt-in paid analysis/transcription cases skipped.
+- Fresh SQLite migration passed through Alembic `20260717_02`; state-v2/state-v3 upgrade and backend-restart consent/transcript recovery tests passed. FastAPI OpenAPI generation passed with 34 paths and 35 operations.
+- ESLint and TypeScript passed. Vitest passed 45 tests across 14 files. Next.js 16.2.10 production build passed with all 9 application routes.
+- Production Chrome inspected the Live Speak consent state at 1440×900, 1024×768, and 390×844. All six steps, Type/Speak controls, consent copy, and both actions were present; no horizontal overflow, clipped control, hydration error, or page console error was found.
+- The browser did not grant microphone permission or initialize transcription. No paid test or OpenAI request ran. No commit or push was performed.
+
+### SDP Line-Terminator Repair
+
+**Date:** 2026-07-20
+
+- Preserved the OpenAI Realtime SDP answer without trimming its required final line terminator before `RTCPeerConnection.setRemoteDescription()`.
+- Added mocked provider and FastAPI endpoint regression assertions that require the returned SDP to retain its trailing CRLF.
+- Focused Ruff checks passed; focused backend tests passed with 16 tests and one paid integration test skipped. No OpenAI request ran.
