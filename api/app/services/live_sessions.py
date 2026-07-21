@@ -32,16 +32,21 @@ from app.schemas.analysis import (
     AgreementAnalysisRequest,
     AgreementAnalysisResponse,
     AgreementTerm,
+    AgreementTermLocalization,
     AnalysisClarificationContext,
     AnalysisMessage,
     AnalysisStatus,
     EvidenceReference,
+    LanguageCode,
+    LocalizedParticipantPosition,
     MeaningState,
     MessageInputSource,
+    MessageTranslation,
     ParticipantPosition,
     ParticipantTermStatus,
     PartyRole,
     SessionMode,
+    TranslationStatus,
 )
 from app.schemas.persistence import (
     PersistedLiveSessionState,
@@ -90,6 +95,7 @@ from app.schemas.workflow import (
     NotApplicableProposal,
     NotApplicableProposalSubmission,
     OptionalDetailsReviewedSubmission,
+    ParticipantProfileSubmission,
     ParticipantReadinessSubmission,
     ParticipantReviewStatus,
     ParticipantUnderstandingReview,
@@ -101,6 +107,7 @@ from app.schemas.workflow import (
     WorkflowErrorCode,
 )
 from app.services.analyzers import AgreementAnalyzer
+from app.services.translation import LiveTranslationService, translation_fingerprint
 
 
 def _id(prefix: str) -> str:
@@ -147,12 +154,14 @@ class LiveSessionService:
         repository: LiveSessionRepository,
         clarification_attempt_limit: int = 3,
         audio_configuration: AudioTranscriptionConfiguration | None = None,
+        translation_service: LiveTranslationService | None = None,
     ) -> None:
         if clarification_attempt_limit < 1:
             raise ValueError("clarification attempt limit must be positive")
         self._analyzer = analyzer
         self._repository = repository
         self._clarification_attempt_limit = clarification_attempt_limit
+        self._translation_service = translation_service
         self._audio_configuration = (
             audio_configuration
             or AudioTranscriptionConfiguration(
@@ -179,12 +188,19 @@ class LiveSessionService:
                 "worker roles.",
                 status_code=422,
             )
-        if {item.role for item in participants} != set(PartyRole) or any(
-            item.language.value != "en" for item in participants
-        ):
+        if {item.role for item in participants} != set(PartyRole):
             raise WorkflowFailure(
                 WorkflowErrorCode.INVALID_REQUEST,
-                "Live sessions currently require one English participant in each role.",
+                "Live sessions require one participant in each role.",
+                status_code=422,
+            )
+        invited = next(
+            item for item in participants if item.role != submission.creator_role
+        )
+        if invited.display_name is not None:
+            raise WorkflowFailure(
+                WorkflowErrorCode.INVALID_REQUEST,
+                "Each participant must provide only their own display name.",
                 status_code=422,
             )
         record = _LiveSessionRecord(
@@ -236,6 +252,28 @@ class LiveSessionService:
             ) from exc
         return self._view(stored.state), stored.revision
 
+    def update_participant_profile(
+        self,
+        session_id: str,
+        role: PartyRole,
+        submission: ParticipantProfileSubmission,
+    ) -> LiveSessionView:
+        with self._transaction(session_id) as transaction:
+            record = transaction.state
+            digest = self._request_digest("participant-profile", role.value, submission)
+            if self._is_replay(record, submission.request_id, digest):
+                return self._view(record)
+            participant_index = next(
+                index
+                for index, participant in enumerate(record.participants)
+                if participant.role == role
+            )
+            record.participants[participant_index] = record.participants[
+                participant_index
+            ].model_copy(update={"display_name": submission.display_name})
+            self._mark_processed(record, submission.request_id, digest)
+            return self._view(record)
+
     def add_draft_statement(
         self,
         session_id: str,
@@ -259,13 +297,16 @@ class LiveSessionService:
                 )
             order = len(record.messages) + 1
             record.messages.append(
-                AnalysisMessage(
-                    message_id=_id("message"),
-                    speaker_id=role.value,
-                    original_text=submission.original_text,
-                    original_language=participant.language,
-                    order=order,
-                    timestamp=_now(),
+                self._message_with_translation_state(
+                    record,
+                    AnalysisMessage(
+                        message_id=_id("message"),
+                        speaker_id=role.value,
+                        original_text=submission.original_text,
+                        original_language=participant.language,
+                        order=order,
+                        timestamp=_now(),
+                    ),
                 )
             )
             record.participant_readiness = {item: False for item in PartyRole}
@@ -427,23 +468,26 @@ class LiveSessionService:
                     status_code=422,
                 )
             record.messages.append(
-                AnalysisMessage(
-                    message_id=_id("message"),
-                    speaker_id=role.value,
-                    original_text=effective_text,
-                    original_language=participant.language,
-                    order=len(record.messages) + 1,
-                    timestamp=submission.completed_at,
-                    input_source=MessageInputSource.AUDIO_TRANSCRIPT,
-                    raw_transcript=submission.raw_transcript,
-                    corrected_text=submission.corrected_text,
-                    effective_text=effective_text,
-                    transcription_model=submission.transcription_model,
-                    transcription_request_id=submission.request_id,
-                    consent_id=consent.id,
-                    audio_started_at=submission.started_at,
-                    audio_completed_at=submission.completed_at,
-                    audio_duration_seconds=submission.duration_seconds,
+                self._message_with_translation_state(
+                    record,
+                    AnalysisMessage(
+                        message_id=_id("message"),
+                        speaker_id=role.value,
+                        original_text=effective_text,
+                        original_language=participant.language,
+                        order=len(record.messages) + 1,
+                        timestamp=submission.completed_at,
+                        input_source=MessageInputSource.AUDIO_TRANSCRIPT,
+                        raw_transcript=submission.raw_transcript,
+                        corrected_text=submission.corrected_text,
+                        effective_text=effective_text,
+                        transcription_model=submission.transcription_model,
+                        transcription_request_id=submission.request_id,
+                        consent_id=consent.id,
+                        audio_started_at=submission.started_at,
+                        audio_completed_at=submission.completed_at,
+                        audio_duration_seconds=submission.duration_seconds,
+                    ),
                 )
             )
             record.audio_duration_seconds[role] = total + submission.duration_seconds
@@ -452,6 +496,139 @@ class LiveSessionService:
             self._invalidate_all_confirmations(record)
             self._mark_processed(record, submission.request_id, digest)
             return self._view(record)
+
+    async def translate_latest_message(
+        self, session_id: str, role: PartyRole
+    ) -> LiveSessionView:
+        record = self._record(session_id)
+        message = next(
+            (
+                item
+                for item in reversed(record.messages)
+                if item.speaker_id == role.value
+                and any(
+                    translation.status
+                    in {TranslationStatus.PENDING, TranslationStatus.FAILED}
+                    for translation in item.translations.values()
+                )
+            ),
+            None,
+        )
+        if message is None:
+            return self._view(record)
+        return await self.translate_message(session_id, message.message_id)
+
+    async def translate_message(
+        self, session_id: str, message_id: str
+    ) -> LiveSessionView:
+        record = self._record(session_id)
+        message = next(
+            (item for item in record.messages if item.message_id == message_id), None
+        )
+        if message is None:
+            raise WorkflowFailure(
+                WorkflowErrorCode.INVALID_REQUEST,
+                "That conversation message could not be found.",
+                status_code=404,
+            )
+        pending = next(iter(message.translations.values()), None)
+        if pending is None or pending.status == TranslationStatus.READY:
+            return self._view(record)
+        expected_fingerprint = pending.fingerprint
+        try:
+            if self._translation_service is None:
+                raise ValueError("Live translation is not configured.")
+            output = await self._translation_service.translate_message(
+                message.effective_text or message.original_text,
+                pending.source_language,
+                pending.target_language,
+            )
+            translated = pending.model_copy(
+                update={
+                    "status": TranslationStatus.READY,
+                    "translated_text": output.translated_text,
+                    "semantic_equivalence_status": output.semantic_equivalence_status,
+                    "preserved_amounts": output.preserved_amounts,
+                    "preserved_currencies": output.preserved_currencies,
+                    "preserved_dates": output.preserved_dates,
+                    "preserved_quantities": output.preserved_quantities,
+                    "warnings": output.warnings,
+                    "model": output.model,
+                    "prompt_version": output.prompt_version,
+                }
+            )
+        except Exception:
+            translated = pending.model_copy(
+                update={
+                    "status": TranslationStatus.FAILED,
+                    "translated_text": None,
+                    "semantic_equivalence_status": None,
+                    "warnings": [
+                        "Translation is unavailable. The original remains visible."
+                    ],
+                }
+            )
+        with self._transaction(session_id) as transaction:
+            current = next(
+                (
+                    item
+                    for item in transaction.state.messages
+                    if item.message_id == message_id
+                ),
+                None,
+            )
+            if current is None:
+                raise WorkflowFailure(
+                    WorkflowErrorCode.INVALID_REQUEST,
+                    "That conversation message could not be found.",
+                    status_code=404,
+                )
+            current_translation = next(iter(current.translations.values()), None)
+            if (
+                current_translation is None
+                or current_translation.fingerprint != expected_fingerprint
+            ):
+                return self._view(transaction.state)
+            index = transaction.state.messages.index(current)
+            transaction.state.messages[index] = current.model_copy(
+                update={"translations": {translated.target_language: translated}}
+            )
+            return self._view(transaction.state)
+
+    def _message_with_translation_state(
+        self, record: _LiveSessionRecord, message: AnalysisMessage
+    ) -> AnalysisMessage:
+        languages = {participant.language for participant in record.participants}
+        if len(languages) == 1:
+            return message
+        target = next(
+            language for language in languages if language != message.original_language
+        )
+        model = (
+            self._translation_service.model
+            if self._translation_service is not None
+            else "unconfigured"
+        )
+        prompt_version = (
+            self._translation_service.prompt_version
+            if self._translation_service is not None
+            else "meaning-preserving-translation-v1"
+        )
+        translation = MessageTranslation(
+            source_language=message.original_language,
+            target_language=target,
+            status=TranslationStatus.PENDING,
+            model=model,
+            prompt_version=prompt_version,
+            fingerprint=translation_fingerprint(
+                message.effective_text or message.original_text,
+                message.original_language,
+                target,
+                model,
+                prompt_version,
+            ),
+        )
+        return message.model_copy(update={"translations": {target: translation}})
 
     def set_participant_readiness(
         self,
@@ -1014,6 +1191,23 @@ class LiveSessionService:
                 self._require_acknowledgments(
                     version, submission.unresolved_item_acknowledgments
                 )
+                participant = next(
+                    item
+                    for item in record.participants
+                    if item.role == submission.participant_id
+                )
+                if any(
+                    participant.language not in term.localizations
+                    for term in version.terms
+                ):
+                    raise WorkflowFailure(
+                        WorkflowErrorCode.INVALID_STATE,
+                        "The agreement view in this participant's language is "
+                        "not ready.",
+                        status_code=409,
+                        retryable=True,
+                        current_agreement_version_id=version.id,
+                    )
             if submission.decision == ConfirmationDecision.REQUEST_CHANGE:
                 self._term(version, submission.change_item_key or "")
                 self._mark_processed(record, submission.request_id, digest)
@@ -1051,6 +1245,7 @@ class LiveSessionService:
                         ),
                         confirmed_at=_now(),
                         language=participant.language,
+                        display_name=participant.display_name,
                         request_id=submission.request_id,
                     )
                 )
@@ -1389,6 +1584,12 @@ class LiveSessionService:
             new_evidence_ids = list(term.evidence_message_ids)
             for role, message in message_by_role.items():
                 selection = question.selections[role]
+                participant = next(
+                    item for item in record.participants if item.role == role
+                )
+                role_name = (
+                    "Customer" if role == PartyRole.HIRER else "Service provider"
+                )
                 new_evidence.append(
                     EvidenceReference(
                         source=(
@@ -1401,9 +1602,9 @@ class LiveSessionService:
                         participant_id=role.value,
                         role=role,
                         speaker_name=(
-                            "Customer"
-                            if role == PartyRole.HIRER
-                            else "Service provider"
+                            f"{participant.display_name} · {role_name}"
+                            if participant.display_name
+                            else role_name
                         ),
                         message_id=message.message_id,
                         original_text=message.original_text,
@@ -1445,6 +1646,12 @@ class LiveSessionService:
                             ),
                             "evidence": new_evidence,
                             "clarification_target": None,
+                            "localizations": self._derived_term_localizations(
+                                term,
+                                question,
+                                aligned=True,
+                                fallback_summary=meaning,
+                            ),
                         },
                         deep=True,
                     )
@@ -1496,6 +1703,12 @@ class LiveSessionService:
                             ),
                             "evidence": new_evidence,
                             "clarification_target": term.analysis_item_key,
+                            "localizations": self._derived_term_localizations(
+                                term,
+                                question,
+                                aligned=False,
+                                fallback_summary=meaning,
+                            ),
                         },
                         deep=True,
                     )
@@ -1503,6 +1716,62 @@ class LiveSessionService:
         derived = self._build_derived_version(record, version, terms)
         self._commit_version(record, derived)
         return derived
+
+    @staticmethod
+    def _derived_term_localizations(
+        term: AgreementTerm,
+        question: _QuestionRecord,
+        *,
+        aligned: bool,
+        fallback_summary: str,
+    ) -> dict[LanguageCode, AgreementTermLocalization]:
+        if not term.localizations:
+            return {}
+
+        options = {item.id: item for item in question.question.options}
+        result: dict[LanguageCode, AgreementTermLocalization] = {}
+        for language, localization in term.localizations.items():
+            selected_by_role: dict[PartyRole, str] = {}
+            for role, selection in question.selections.items():
+                option = options[selection.option_id]
+                selected_by_role[role] = (
+                    selection.other_text
+                    or option.localizations.get(language)
+                    or option.label
+                )
+
+            existing_by_participant = {
+                item.participant_id: item.summary
+                for item in localization.participant_positions
+            }
+            positions = [
+                LocalizedParticipantPosition(
+                    participant_id=role.value,
+                    summary=(
+                        selected_by_role.get(role)
+                        or existing_by_participant.get(role.value)
+                        or localization.summary
+                    ),
+                )
+                for role in PartyRole
+                if role in selected_by_role or role.value in existing_by_participant
+            ]
+            if aligned:
+                localized_summary = next(
+                    iter(selected_by_role.values()), localization.summary
+                )
+            elif language == LanguageCode.HINDI:
+                localized_summary = f"{localization.label} के लिए चुने गए अर्थ अलग हैं।"
+            else:
+                localized_summary = fallback_summary
+            result[language] = localization.model_copy(
+                update={
+                    "summary": localized_summary,
+                    "participant_positions": positions,
+                    "provenance": "participant-choice-v1",
+                }
+            )
+        return result
 
     def _record(self, session_id: str) -> _LiveSessionRecord:
         try:
@@ -1999,6 +2268,7 @@ class LiveSessionService:
             status=UnderstandingQuestionStatus.PENDING,
             question_number=question_number,
             question_count=question_count,
+            prompt_localizations=definition.prompt_localizations,
         )
         stored = _QuestionRecord(
             question=question,
@@ -2262,23 +2532,37 @@ class LiveSessionService:
             )
         start = max(item.order for item in record.messages) + 1
         timestamp = _now()
-        return [
-            AnalysisMessage(
-                message_id=_id(
-                    "clarification"
-                    if question.question.kind == UnderstandingQuestionKind.CLARIFICATION
-                    else "understanding"
-                ),
-                speaker_id=role.value,
-                original_text=selection.semantic_value,
-                original_language=next(
-                    item.language for item in record.participants if item.role == role
-                ),
-                order=start + offset,
-                timestamp=timestamp,
+        result: list[AnalysisMessage] = []
+        for offset, (role, selection) in enumerate(question.selections.items()):
+            language = next(
+                item.language for item in record.participants if item.role == role
             )
-            for offset, (role, selection) in enumerate(question.selections.items())
-        ]
+            option = next(
+                item
+                for item in question.question.options
+                if item.id == selection.option_id
+            )
+            original_text = (
+                selection.other_text
+                or option.localizations.get(language)
+                or option.label
+            )
+            result.append(
+                AnalysisMessage(
+                    message_id=_id(
+                        "clarification"
+                        if question.question.kind
+                        == UnderstandingQuestionKind.CLARIFICATION
+                        else "understanding"
+                    ),
+                    speaker_id=role.value,
+                    original_text=original_text,
+                    original_language=language,
+                    order=start + offset,
+                    timestamp=timestamp,
+                )
+            )
+        return result
 
     def _validated_appended_messages(
         self, record: _LiveSessionRecord, messages: list[AnalysisMessage]
@@ -2708,9 +2992,12 @@ class LiveSessionService:
                     participant_id=item.role,
                     role=item.role,
                     display_name=(
-                        "Customer"
-                        if item.role == PartyRole.HIRER
-                        else "Service provider"
+                        item.display_name
+                        or (
+                            "Customer"
+                            if item.role == PartyRole.HIRER
+                            else "Service provider"
+                        )
                     ),
                     language=item.language,
                 )
@@ -2762,6 +3049,7 @@ class LiveSessionService:
                     confirmation_id=item.id,
                     confirmed_at=item.confirmed_at,
                     language=item.language,
+                    display_name=item.display_name,
                 )
                 for item in confirmations
             ],

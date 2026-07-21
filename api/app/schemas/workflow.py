@@ -176,6 +176,7 @@ class LiveInvitation(StrictModel):
 class LiveInvitationExchange(StrictModel):
     invitation: str = Field(min_length=32, max_length=200)
     privacy_notice_accepted: bool
+    display_name: str | None = Field(default=None, max_length=80)
 
     @model_validator(mode="after")
     def require_notice(self) -> LiveInvitationExchange:
@@ -297,6 +298,7 @@ class ConfirmationRecord(FrozenWorkflowModel):
     )
     confirmed_at: datetime
     language: LanguageCode
+    display_name: str | None = Field(default=None, max_length=80)
     request_id: Identifier
     invalidated_at: datetime | None = None
 
@@ -332,6 +334,7 @@ class ReceiptConfirmation(FrozenWorkflowModel):
     confirmation_id: Identifier
     confirmed_at: datetime
     language: LanguageCode
+    display_name: str | None = Field(default=None, max_length=80)
 
 
 class LiveClarityReceipt(FrozenWorkflowModel):
@@ -355,12 +358,24 @@ class LiveClarityReceipt(FrozenWorkflowModel):
     )
     confirmations: list[ReceiptConfirmation] = Field(min_length=2, max_length=2)
     status: ReceiptStatus
-    application_version: str = "0.4.0"
-    schema_version: str = "clarity-receipt-v2"
+    application_version: str = "0.5.0"
+    schema_version: str = "clarity-receipt-v3"
     disclaimer: str = (
         "This clarity receipt records the participants’ stated understanding. "
         "MeaningSync does not provide legal advice, and this receipt is not "
         "presented as a legally enforceable contract."
+    )
+    disclaimer_hi: str = (
+        "यह स्पष्टता रसीद प्रतिभागियों द्वारा बताई गई समझ दर्ज करती है। "
+        "MeaningSync कानूनी सलाह नहीं देता और यह रसीद कानूनी रूप से लागू "
+        "होने वाला अनुबंध नहीं है।"
+    )
+    identity_disclaimer: str = (
+        "Participant names are self-provided display names. MeaningSync does not "
+        "verify identity."
+    )
+    identity_disclaimer_hi: str = (
+        "प्रतिभागियों के नाम स्वयं दिए गए प्रदर्शन नाम हैं। MeaningSync पहचान सत्यापित नहीं करता।"
     )
     integrity_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
 
@@ -468,6 +483,15 @@ class FinalizedAudioTranscriptSubmission(StrictModel):
 
 class ParticipantReadinessSubmission(StrictModel):
     ready: bool
+    request_id: Identifier
+
+
+class ParticipantProfileSubmission(StrictModel):
+    display_name: str | None = Field(default=None, max_length=80)
+    request_id: Identifier
+
+
+class TranslationRetrySubmission(StrictModel):
     request_id: Identifier
 
 

@@ -11,7 +11,7 @@ import {
   type AgreementTerm,
   type LiveClarityReceipt,
 } from "@/lib/api";
-import { roleLabel } from "@/lib/flow-presentation";
+import { participantLabel, roleLabel } from "@/lib/flow-presentation";
 import { getAnyLiveAccess } from "@/lib/live-access";
 
 const languageNames = { en: "English", hi: "Hindi" } as const;
@@ -105,6 +105,7 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
   ]);
   const notDiscussed = uniqueTerms(receipt.not_discussed_terms);
   const hasOpenPoints = receipt.status === "contains_unresolved_items";
+  const bilingual = new Set(receipt.participants.map((item) => item.language)).size > 1;
   const allTerms = uniqueTerms([...aligned, ...unresolved, ...notDiscussed]);
   const termLabel = (itemKey: string) =>
     allTerms.find((term) => term.analysis_item_key === itemKey)?.label ??
@@ -120,6 +121,7 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
             <div className="receipt-mark" aria-hidden="true">✓</div>
             <div>
               <p>MeaningSync Clarity Receipt — not a legal contract.</p>
+              {bilingual ? <p lang="hi">MeaningSync स्पष्टता रसीद — कानूनी अनुबंध नहीं।</p> : null}
               <h1>{hasOpenPoints ? "Both people confirmed this record contains unresolved points" : "Both people confirmed this understanding"}</h1>
               <span>Issued {new Date(receipt.issued_at).toLocaleString()}</span>
             </div>
@@ -134,7 +136,7 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
 
           <section className="receipt-meta" aria-label="Receipt summary">
             <div><span>Status</span><strong>{hasOpenPoints ? "Some points remain unresolved" : "All recorded meanings match"}</strong></div>
-            <div><span>Participants</span><strong>{receipt.participants.map((participant) => roleLabel(participant.role)).join(" and ")}</strong></div>
+            <div><span>Participants</span><strong>{receipt.participants.map((participant) => participantLabel(participant)).join(" and ")}</strong></div>
             <div><span>Session currency</span><strong>{receipt.currency}</strong></div>
             <div><span>Session started</span><strong>{receipt.session_created_at ? new Date(receipt.session_created_at).toLocaleString() : "Not recorded"}</strong></div>
             <div><span>Receipt ID</span><strong>{receipt.id}</strong></div>
@@ -142,20 +144,20 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
 
           <section className="receipt-section">
             <header><span>Matching understanding</span><h2>What both people understood the same way</h2></header>
-            <div className="receipt-term-group"><GuidedTermList terms={aligned} /></div>
+            <div className="receipt-term-group"><ReceiptTerms terms={aligned} bilingual={bilingual} /></div>
           </section>
 
           {unresolved.length > 0 && (
             <section className="receipt-section receipt-open-terms">
               <header><span>Open points</span><h2>What remains unresolved</h2></header>
-              <div className="receipt-term-group"><GuidedTermList terms={unresolved} showState /></div>
+              <div className="receipt-term-group"><ReceiptTerms terms={unresolved} bilingual={bilingual} showState /></div>
             </section>
           )}
 
           {(notDiscussed.length > 0 || receipt.not_applicable_terms.length > 0) && (
             <details className="receipt-section receipt-not-discussed">
               <summary><span>Not discussed</span><strong>Open details and not-applicable proposals</strong></summary>
-              <GuidedTermList terms={notDiscussed} />
+              <ReceiptTerms terms={notDiscussed} bilingual={bilingual} />
               {receipt.not_applicable_terms.length > 0 && (
                 <div className="not-applicable-list">
                   <strong>Proposed not applicable</strong>
@@ -173,14 +175,19 @@ export function ClarityReceiptView({ sessionId }: { sessionId: string }) {
               {receipt.confirmations.map((confirmation) => (
                 <article key={confirmation.participant_id}>
                   <span className={`avatar small ${confirmation.participant_id === "worker" ? "worker" : ""}`}>{roleLabel(confirmation.participant_id)[0]}</span>
-                  <p><strong>{roleLabel(confirmation.participant_id)}</strong><span>Confirmed {new Date(confirmation.confirmed_at).toLocaleString()}</span></p>
+                  <p><strong>{confirmation.display_name ? `${confirmation.display_name} · ${roleLabel(confirmation.participant_id)}` : roleLabel(confirmation.participant_id)}</strong><span>Confirmed {new Date(confirmation.confirmed_at).toLocaleString()}</span></p>
                   <i aria-label="Confirmed">✓</i>
                 </article>
               ))}
             </div>
           </section>
 
-          <section className="receipt-disclaimer"><p>{receipt.disclaimer}</p></section>
+          <section className="receipt-disclaimer">
+            <p>{receipt.disclaimer}</p>
+            {bilingual ? <p lang="hi">{receipt.disclaimer_hi ?? "यह स्पष्टता रसीद कानूनी अनुबंध नहीं है।"}</p> : null}
+            <p>{receipt.identity_disclaimer ?? "Participant names are self-provided display names. MeaningSync does not verify identity."}</p>
+            {bilingual ? <p lang="hi">{receipt.identity_disclaimer_hi ?? "प्रतिभागियों के नाम स्वयं दिए गए प्रदर्शन नाम हैं। MeaningSync पहचान सत्यापित नहीं करता।"}</p> : null}
+          </section>
 
           <details className="receipt-advanced">
             <summary>Advanced details</summary>
@@ -232,5 +239,15 @@ function uniqueTerms(terms: AgreementTerm[]) {
       terms.findIndex(
         (candidate) => candidate.analysis_item_key === term.analysis_item_key,
       ) === index,
+  );
+}
+
+function ReceiptTerms({ terms, bilingual, showState = false }: { terms: AgreementTerm[]; bilingual: boolean; showState?: boolean }) {
+  if (!bilingual) return <GuidedTermList terms={terms} showState={showState} />;
+  return (
+    <div className="bilingual-receipt-terms">
+      <section lang="en"><h3>English</h3><GuidedTermList terms={terms} language="en" showState={showState} /></section>
+      <section lang="hi"><h3>हिंदी</h3><GuidedTermList terms={terms} language="hi" showState={showState} /></section>
+    </div>
   );
 }

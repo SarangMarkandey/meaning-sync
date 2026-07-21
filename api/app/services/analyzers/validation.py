@@ -8,6 +8,7 @@ from app.schemas.analysis import (
     AgreementAnalysisResponse,
     AgreementFacet,
     AgreementTerm,
+    AgreementTermLocalization,
     AgreementTopic,
     AnalysisErrorCode,
     AnalysisStatus,
@@ -15,11 +16,14 @@ from app.schemas.analysis import (
     AnalysisWarningCode,
     ClarificationQuestion,
     EvidenceReference,
+    LanguageCode,
+    LocalizedParticipantPosition,
     MeaningState,
     ModelAgreementTerm,
     ParticipantPosition,
     ParticipantTermStatus,
     PartyRole,
+    SessionMode,
 )
 from app.services.analyzers.base import AnalysisFailure
 
@@ -57,6 +61,52 @@ ITEM_LABELS = {
 ROLE_NAMES = {
     PartyRole.HIRER: "Homeowner",
     PartyRole.WORKER: "Electrician",
+}
+
+LIVE_ROLE_NAMES = {
+    PartyRole.HIRER: "Customer",
+    PartyRole.WORKER: "Service provider",
+}
+
+ITEM_LABELS_HI = {
+    "scope.work": "काम का दायरा",
+    "price.amount": "मजदूरी की कीमत",
+    "materials.inclusion": "सामग्री और बदलने वाले पुर्जे",
+    "timing.start": "काम शुरू होने का समय",
+    "completion.deadline": "काम पूरा होने की तारीख या समय",
+    "payment.timing": "भुगतान का समय",
+    "responsibilities.assignment": "जिम्मेदारियाँ",
+    "warranty.coverage": "वारंटी",
+    "cancellation.policy": "रद्द करने की नीति",
+    "additional_work.policy": "अतिरिक्त काम",
+    "other.detail": "अन्य सहमति विवरण",
+}
+
+DEMO_HINDI_SUMMARIES = {
+    "scope.work": "दोनों प्रतिभागी एक पंखा और दो स्विच ठीक करने पर सहमत हैं।",
+    "price.amount": "दोनों प्रतिभागी मजदूरी की कीमत ₹1,200 बताते हैं।",
+    "materials.inclusion": (
+        "प्रतिभागी इस बात पर असहमत हैं कि ₹1,200 में बदलने वाले पुर्जे शामिल हैं या नहीं।"
+    ),
+    "timing.start": "दोनों प्रतिभागी सहमत हैं कि काम आज शुरू हो सकता है।",
+    "completion.deadline": "काम पूरा होने की तारीख या समय पर चर्चा नहीं हुई।",
+    "payment.timing": "भुगतान के समय पर चर्चा नहीं हुई।",
+    "responsibilities.assignment": "अतिरिक्त जिम्मेदारियों पर चर्चा नहीं हुई।",
+    "warranty.coverage": "वारंटी पर चर्चा नहीं हुई।",
+    "cancellation.policy": "रद्द करने की नीति पर चर्चा नहीं हुई।",
+    "additional_work.policy": "अतिरिक्त काम की नीति पर चर्चा नहीं हुई।",
+    "other.detail": "अन्य विवरण पर चर्चा नहीं हुई।",
+}
+
+DEMO_HINDI_POSITIONS = {
+    ("scope.work", PartyRole.HIRER): "एक पंखा और दो स्विच ठीक करने हैं।",
+    ("scope.work", PartyRole.WORKER): "एक पंखा और दो स्विच ठीक करने हैं।",
+    ("price.amount", PartyRole.HIRER): "बताई गई राशि ₹1,200 है।",
+    ("price.amount", PartyRole.WORKER): "मजदूरी की राशि ₹1,200 है।",
+    ("materials.inclusion", PartyRole.HIRER): "₹1,200 में बदलने वाले पुर्जे शामिल हैं।",
+    ("materials.inclusion", PartyRole.WORKER): "बदलने वाले पुर्जों का खर्च अलग है।",
+    ("timing.start", PartyRole.HIRER): "काम आज शुरू हो सकता है।",
+    ("timing.start", PartyRole.WORKER): "सेवा प्रदाता आज काम शुरू कर सकता है।",
 }
 
 CLARIFICATION_WARNING = (
@@ -345,7 +395,9 @@ def build_analysis_response(
                 reference_id=message.message_id,
                 participant_id=message.speaker_id,
                 role=participant_by_id[message.speaker_id].role,
-                speaker_name=ROLE_NAMES[participant_by_id[message.speaker_id].role],
+                speaker_name=_participant_display_name(
+                    participant_by_id[message.speaker_id], request.mode
+                ),
                 message_id=message.message_id,
                 original_text=message.original_text,
                 original_language=message.original_language,
@@ -364,6 +416,14 @@ def build_analysis_response(
             clarification_candidates.append(
                 (term_id, model_term.clarification_question)
             )
+        localizations = _term_localizations(
+            request,
+            model_term=model_term,
+            item_key=item_key,
+            label=ITEM_LABELS[(model_term.topic, model_term.facet)],
+            summary=model_term.neutral_summary,
+            positions=positions,
+        )
         terms.append(
             AgreementTerm(
                 id=term_id,
@@ -378,6 +438,7 @@ def build_analysis_response(
                 evidence_message_ids=evidence_ids,
                 evidence=evidence,
                 clarification_target=None,
+                localizations=localizations,
             )
         )
 
@@ -407,6 +468,146 @@ def build_analysis_response(
         terms=terms,
         primary_clarification=clarification,
     )
+
+
+def _participant_display_name(participant, mode) -> str:
+    role_name = (
+        ROLE_NAMES[participant.role]
+        if mode.value == "demo"
+        else LIVE_ROLE_NAMES[participant.role]
+    )
+    return (
+        f"{participant.display_name} · {role_name}"
+        if participant.display_name
+        else role_name
+    )
+
+
+def _term_localizations(
+    request: AgreementAnalysisRequest,
+    *,
+    model_term: ModelAgreementTerm,
+    item_key: str,
+    label: str,
+    summary: str,
+    positions: list[ParticipantPosition],
+) -> dict[LanguageCode, AgreementTermLocalization]:
+    required_languages = {participant.language for participant in request.participants}
+    if request.mode == SessionMode.DEMO:
+        return _deterministic_demo_localizations(
+            required_languages,
+            item_key=item_key,
+            label=label,
+            summary=summary,
+            positions=positions,
+        )
+
+    provided = {item.language: item for item in model_term.localizations}
+    if len(provided) != len(model_term.localizations):
+        raise invalid_output(f"{item_key} contains duplicate localizations")
+    if set(provided) - required_languages:
+        raise invalid_output(f"{item_key} contains an unrequested localization")
+
+    result: dict[LanguageCode, AgreementTermLocalization] = {}
+    if LanguageCode.ENGLISH in required_languages:
+        localized = provided.get(LanguageCode.ENGLISH)
+        result[LanguageCode.ENGLISH] = AgreementTermLocalization(
+            language=LanguageCode.ENGLISH,
+            label=label,
+            summary=localized.summary if localized is not None else summary,
+            participant_positions=_validated_localized_positions(
+                item_key,
+                positions,
+                localized.participant_positions if localized is not None else None,
+            ),
+            provenance="analyzer-output",
+        )
+    if LanguageCode.HINDI in required_languages:
+        localized = provided.get(LanguageCode.HINDI)
+        if localized is None:
+            raise invalid_output(
+                f"{item_key} is missing its required Hindi localization"
+            )
+        result[LanguageCode.HINDI] = AgreementTermLocalization(
+            language=LanguageCode.HINDI,
+            label=ITEM_LABELS_HI[item_key],
+            summary=localized.summary,
+            participant_positions=_validated_localized_positions(
+                item_key, positions, localized.participant_positions
+            ),
+            provenance="analyzer-output-hi",
+        )
+    return result
+
+
+def _validated_localized_positions(
+    item_key: str,
+    positions: list[ParticipantPosition],
+    localized_positions,
+) -> list[LocalizedParticipantPosition]:
+    if localized_positions is None:
+        return [
+            LocalizedParticipantPosition(
+                participant_id=position.participant_id,
+                summary=position.summary,
+            )
+            for position in positions
+        ]
+    provided = {item.participant_id: item.summary for item in localized_positions}
+    expected_ids = {item.participant_id for item in positions}
+    if len(provided) != len(localized_positions) or set(provided) != expected_ids:
+        raise invalid_output(
+            f"{item_key} localization positions must match its semantic positions"
+        )
+    return [
+        LocalizedParticipantPosition(
+            participant_id=position.participant_id,
+            summary=provided[position.participant_id],
+        )
+        for position in positions
+    ]
+
+
+def _deterministic_demo_localizations(
+    required_languages: set[LanguageCode],
+    *,
+    item_key: str,
+    label: str,
+    summary: str,
+    positions: list[ParticipantPosition],
+) -> dict[LanguageCode, AgreementTermLocalization]:
+    result: dict[LanguageCode, AgreementTermLocalization] = {}
+    if LanguageCode.ENGLISH in required_languages:
+        result[LanguageCode.ENGLISH] = AgreementTermLocalization(
+            language=LanguageCode.ENGLISH,
+            label=label,
+            summary=summary,
+            participant_positions=[
+                LocalizedParticipantPosition(
+                    participant_id=position.participant_id,
+                    summary=position.summary,
+                )
+                for position in positions
+            ],
+            provenance="deterministic-demo-v1",
+        )
+    if LanguageCode.HINDI in required_languages:
+        result[LanguageCode.HINDI] = AgreementTermLocalization(
+            language=LanguageCode.HINDI,
+            label=ITEM_LABELS_HI[item_key],
+            summary=DEMO_HINDI_SUMMARIES[item_key],
+            participant_positions=[
+                LocalizedParticipantPosition(
+                    participant_id=position.participant_id,
+                    summary=DEMO_HINDI_POSITIONS.get(
+                        (item_key, position.role), DEMO_HINDI_SUMMARIES[item_key]
+                    ),
+                )
+                for position in positions
+            ],
+            provenance="deterministic-demo-v1",
+        )
+    return result
 
 
 def _participant_statuses(

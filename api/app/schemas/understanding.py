@@ -5,7 +5,7 @@ from enum import StrEnum
 
 from pydantic import ConfigDict, Field, model_validator
 
-from app.schemas.analysis import Identifier, PartyRole, StrictModel
+from app.schemas.analysis import Identifier, LanguageCode, PartyRole, StrictModel
 
 
 class FrozenUnderstandingModel(StrictModel):
@@ -61,6 +61,7 @@ class UnderstandingOption(FrozenUnderstandingModel):
     id: Identifier
     label: str = Field(min_length=1, max_length=600)
     kind: UnderstandingOptionKind
+    localizations: dict[LanguageCode, str] = Field(default_factory=dict, max_length=2)
 
 
 class UnderstandingOutcomePosition(FrozenUnderstandingModel):
@@ -96,6 +97,9 @@ class UnderstandingQuestion(FrozenUnderstandingModel):
     question_number: int = Field(ge=1, le=3)
     question_count: int = Field(ge=1, le=3)
     outcome: UnderstandingQuestionOutcome | None = None
+    prompt_localizations: dict[LanguageCode, str] = Field(
+        default_factory=dict, max_length=2
+    )
 
     @model_validator(mode="after")
     def validate_question(self) -> UnderstandingQuestion:

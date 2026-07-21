@@ -7,28 +7,19 @@ import { FormEvent, useState } from "react";
 import { LiveProgress } from "@/components/live-flow-shell";
 import type { CurrencyCode, LanguageCode, PartyRole } from "@/lib/api";
 
-const participants: Array<{ role: PartyRole; title: string; label: string }> = [
-  { role: "hirer", title: "Participant 1", label: "Homeowner" },
-  { role: "worker", title: "Participant 2", label: "Electrician" },
-];
-
-const languageNames: Record<LanguageCode, string> = {
-  en: "English",
-  hi: "Hindi",
-};
+type DemoPreset = "english" | "bilingual";
 
 export function DemoSetup() {
   const router = useRouter();
-  const [languages, setLanguages] = useState<Record<PartyRole, LanguageCode>>({
-    hirer: "en",
-    worker: "en",
-  });
+  const [preset, setPreset] = useState<DemoPreset>("english");
   const [currency, setCurrency] = useState<CurrencyCode>("INR");
-  const supported = languages.hirer === "en" && languages.worker === "en";
+  const languages: Record<PartyRole, LanguageCode> =
+    preset === "bilingual"
+      ? { hirer: "hi", worker: "en" }
+      : { hirer: "en", worker: "en" };
 
   const startDemo = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!supported) return;
     const query = new URLSearchParams({
       hirer_language: languages.hirer,
       worker_language: languages.worker,
@@ -52,42 +43,27 @@ export function DemoSetup() {
         />
         <header className="flow-heading">
           <span>Demo setup</span>
-          <h1>Choose the conversation languages</h1>
-          <p>Each person can use the language they are most comfortable with.</p>
+          <h1>Choose a prepared demo</h1>
+          <p>Both presets are deterministic, key-free, and use the same six-step flow.</p>
         </header>
 
         <form onSubmit={startDemo}>
-          <div className="setup-grid">
-            {participants.map((participant) => (
-              <article className="setup-card" key={participant.role}>
-                <div className="setup-participant">
-                  <span>{participant.title}</span>
-                  <h2>{participant.label}</h2>
-                </div>
-                <label htmlFor={`${participant.role}-language`}>Language</label>
-                <select
-                  id={`${participant.role}-language`}
-                  value={languages[participant.role]}
-                  onChange={(event) =>
-                    setLanguages((current) => ({
-                      ...current,
-                      [participant.role]: event.target.value as LanguageCode,
-                    }))
-                  }
-                >
-                  <option value="en">English</option>
-                  <option value="hi" disabled>
-                    Hindi — Coming soon
-                  </option>
-                </select>
-              </article>
-            ))}
-          </div>
+          <fieldset className="demo-preset-grid">
+            <legend>Demo conversation</legend>
+            <label>
+              <input type="radio" name="demo-preset" value="english" checked={preset === "english"} onChange={() => setPreset("english")} />
+              <span><strong>English Demo</strong><small>Homeowner and electrician both speak English.</small></span>
+            </label>
+            <label>
+              <input type="radio" name="demo-preset" value="bilingual" checked={preset === "bilingual"} onChange={() => setPreset("bilingual")} />
+              <span><strong>English / Hindi Demo</strong><small>Homeowner speaks Hindi; electrician speaks English.</small></span>
+            </label>
+          </fieldset>
 
           <div className="setup-status" role="status">
             <span>Selected conversation</span>
             <strong>
-              {languageNames[languages.hirer]} ↔ {languageNames[languages.worker]}
+              {preset === "bilingual" ? "Hindi ↔ English" : "English ↔ English"}
             </strong>
           </div>
           <label className="setup-currency" htmlFor="demo-currency">
@@ -105,16 +81,13 @@ export function DemoSetup() {
             </select>
             <small>The prepared Demo uses INR evidence without conversion.</small>
           </label>
-          <p className="setup-availability">
-            English conversations are available now. Hindi and mixed-language
-            conversations are coming next.
-          </p>
+          <p className="setup-availability">No microphone or OpenAI request is used in Demo Mode.</p>
 
           <div className="setup-actions">
             <Link className="button secondary" href="/">
               Back to home
             </Link>
-            <button className="button primary" type="submit" disabled={!supported}>
+            <button className="button primary" type="submit">
               Start Demo <span>→</span>
             </button>
           </div>

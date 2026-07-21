@@ -2,7 +2,9 @@
 
 ## Durable Session State
 
-`live_sessions` stores Pydantic-validated versioned JSON plus optimistic `revision`, creation/update times, and expiry. New documents use `state-v4`; readers migrate v1/v2/v3 documents with empty consent and zero-duration defaults. State includes participants, participation mode, creator role, currency, per-role readiness, audio consent/duration, messages, immutable agreement versions, private selections, confirmations, idempotency digests, evidence, and receipt.
+`live_sessions` stores Pydantic-validated versioned JSON plus optimistic `revision`, creation/update times, and expiry. New documents use `state-v5`; readers migrate v1/v2/v3/v4 documents with safe defaults. State includes participants with optional self-provided display names, participation mode, creator role, language, currency, per-role readiness, audio consent/duration, messages, immutable agreement versions, private selections, confirmations, idempotency digests, evidence, and receipt.
+
+Each mixed-language message owns at most one derived `MessageTranslation`: source/target language, lifecycle status, translated text only when safe, semantic-equivalence result, preserved critical values, model/prompt provenance, warnings, and SHA-256 fingerprint. The original/effective text and audio provenance remain unchanged. Agreement terms and questions contain language-keyed display localizations while semantic item/option IDs remain canonical. Receipt v3 hashes localizations, confirmations, and unresolved state.
 
 Typed messages retain effective text, language, order, timestamp, speaker, and source. Audio messages additionally retain immutable machine transcript, optional participant correction, analyzed effective text, transcription model/request, consent reference, capture timestamps, and duration. Evidence copies this provenance into agreement versions and receipts. Raw audio, SDP, partial deltas, media objects, and API credentials are never fields in the durable model.
 

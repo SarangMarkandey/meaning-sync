@@ -4,8 +4,9 @@
 
 Every Live endpoint except creation and invitation exchange requires `Authorization: Bearer <role-access-token>`. Missing or invalid credentials return `401`; a valid credential used for another session or participant role returns `403`; stale agreement writes retain the existing `409` contract.
 
-- `POST /api/v1/live/sessions` accepts `participation_mode`, `creator_role`, `currency`, and independent participant languages. Shared-device creation returns both role credentials; separate-device creation returns the creator credential and one invitation for the opposite role.
-- `POST /api/v1/live/invitations/exchange` atomically exchanges the one-time invitation for the invited role credential.
+- `POST /api/v1/live/sessions` accepts `participation_mode`, `creator_role`, `currency`, independent English/Hindi participant languages, and an optional display name only for the creator. Shared-device creation returns both role credentials; separate-device creation returns the creator credential and one invitation for the opposite role.
+- `POST /api/v1/live/invitations/exchange` atomically exchanges the one-time invitation for the invited role credential and accepts only that participant's optional self-provided display name.
+- `POST /api/v1/live/sessions/{id}/participant-profile` lets the authorized participant set their own optional display name; it cannot change the other role.
 - `POST /api/v1/live/sessions/{id}/invitations/regenerate` replaces a pending invitation.
 - `POST /api/v1/live/sessions/{id}/participants/{role}/revoke` lets the creator revoke the opposite role’s access.
 - `POST /api/v1/live/sessions/{id}/draft-statements` appends a server-owned message for the bearer role before analysis.
@@ -15,8 +16,9 @@ Every Live endpoint except creation and invitation exchange requires `Authorizat
 - `POST /api/v1/live/sessions/{id}/transcription-session` accepts authorized `application/sdp` and returns only `application/sdp`; it creates no evidence.
 - `POST /api/v1/live/sessions/{id}/transcription-session/end` releases the bearer role’s transient concurrency lease after stop, cancel, failure, or navigation.
 - `POST /api/v1/live/sessions/{id}/audio-transcripts` appends one reviewed transcript with raw/corrected/effective provenance, consent, model, timing, revision, and request ID.
+- `POST /api/v1/live/sessions/{id}/messages/{message_id}/translation/retry` retries a failed derived translation without altering the original message.
 
-Session views include `revision`, `participation_mode`, `viewer_role`, and participant presence. `GET` also returns the revision as `ETag`. Secrets never belong in query parameters or ordinary session views.
+Session views include `revision`, `participation_mode`, `viewer_role`, participant presence/names, message translation states, and required agreement localizations. `GET` also returns the revision as `ETag`. Secrets never belong in query parameters or ordinary session views. Names are display-only and do not affect authorization.
 
 ## Live Audio Transcription
 
@@ -30,13 +32,13 @@ All operations are JSON under `/api/v1/live/sessions`. FastAPI owns lifecycle st
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/live/sessions` | Create an English Live session with Customer/Service provider domain roles and an initially empty conversation. |
+| `POST` | `/api/v1/live/sessions` | Create an English/Hindi Live session with Customer/Service provider domain roles and an initially empty conversation. |
 | `GET` | `/api/v1/live/sessions/{session_id}` | Reload the authoritative durable session view after refresh or backend restart. |
 | `POST` | `/api/v1/live/sessions/{session_id}/analysis` | Analyze the draft and create Agreement Map v1. Body: `expected_agreement_version_id` (initially `null`). |
 | `GET` | `/api/v1/live/sessions/{session_id}/agreement-versions` | List immutable snapshots in version order. |
 | `GET` | `/api/v1/live/sessions/{session_id}/agreement-versions/{version_id}` | Retrieve one immutable snapshot for comparison. |
 
-An `AgreementVersion` contains its ID and increasing internal number, user-facing `meaningful_version_number`, `has_meaningful_change`, deterministic `semantic_fingerprint`, parent and session IDs, creation time, source message IDs, full `terms`, unresolved item keys, not-applicable proposals, prompt/model/schema metadata, analysis status/warnings, exact primary clarification, and per-item changes. Internal order records every validated analysis; the meaningful number changes only when normalized agreement meaning changes.
+An `AgreementVersion` contains its ID and increasing internal number, user-facing `meaningful_version_number`, `has_meaningful_change`, deterministic `semantic_fingerprint`, parent and session IDs, creation time, source message IDs, full semantic `terms` plus required English/Hindi localizations, unresolved item keys, not-applicable proposals, prompt/model/schema metadata, analysis status/warnings, exact primary clarification, and per-item changes. Internal order records every validated analysis; the meaningful number changes only when normalized agreement meaning changes.
 
 Every session response also contains compatibility `guidance`, plus `creator_role`, `currency`, `participant_readiness`, and an optional conversation-reentry item. The client maps server lifecycle centrally to exactly:
 
@@ -81,7 +83,7 @@ A `confirm` decision binds that participant to the current version and acknowled
 | `POST` | `/{session_id}/receipt` | Issue after both participants confirm the same current version. Body: expected version and `request_id`. |
 | `GET` | `/{session_id}/receipt` | Retrieve the immutable durable snapshot; returns `receipt_not_ready` before issuance. |
 
-The immutable receipt separates aligned, conflicting/unresolved, one-sided, not-applicable, and not-discussed entries; retains evidence and agreement history; records roles, languages, session currency, session/confirmation timestamps, original evidence currency, and an integrity hash; and reports `fully_aligned` or `contains_unresolved_items`.
+The immutable receipt separates aligned, conflicting/unresolved, one-sided, not-applicable, and not-discussed entries; retains original evidence and agreement history; records optional display names, roles, languages, session currency, session/confirmation timestamps, original evidence currency, required localization provenance, and an integrity hash; and reports `fully_aligned` or `contains_unresolved_items`. A mixed-language receipt carries English and Hindi term views and both legal/identity disclaimers.
 
 ## Errors and Concurrency
 

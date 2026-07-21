@@ -4,13 +4,17 @@ import {
   type VisibleFlowStage,
   visibleFlowSteps,
 } from "@/lib/flow-presentation";
+import type { LanguageCode } from "@/lib/api";
+import { t } from "@/lib/i18n";
 
 export function LiveProgress({
   currentStage,
   explanation,
+  language = "en",
 }: {
   currentStage: VisibleFlowStage;
   explanation: string;
+  language?: LanguageCode;
 }) {
   const currentIndex = visibleFlowSteps.findIndex(
     (stage) => stage.id === currentStage,
@@ -30,7 +34,7 @@ export function LiveProgress({
               aria-disabled={!complete && !current ? "true" : undefined}
             >
               <i aria-hidden="true">{complete ? "✓" : index + 1}</i>
-              <strong>{stage.label}</strong>
+              <strong>{t(language, stage.id === "check_understanding" ? "checkUnderstanding" : stage.id)}</strong>
             </span>
           );
         })}

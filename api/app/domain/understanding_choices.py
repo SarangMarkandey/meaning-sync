@@ -11,7 +11,7 @@ from app.domain.agreement_guidance import (
     normalize_meaning_text,
     semantic_target,
 )
-from app.schemas.analysis import AgreementTerm, MeaningState, PartyRole
+from app.schemas.analysis import AgreementTerm, LanguageCode, MeaningState, PartyRole
 from app.schemas.understanding import (
     UnderstandingOption,
     UnderstandingOptionKind,
@@ -46,6 +46,7 @@ class QuestionDefinition:
     meaning_fingerprint: str
     question_fingerprint: str
     prompt: str
+    prompt_localizations: dict[LanguageCode, str]
     options: tuple[OptionDefinition, ...]
     evidence_reference_ids: tuple[str, ...]
 
@@ -67,6 +68,7 @@ def build_question_definition(
             label=label,
             semantic_value=semantic_value,
             kind=option_kind,
+            localizations=_option_localizations(term, label, option_kind),
         )
         for label, semantic_value, option_kind in positions
     ]
@@ -77,12 +79,20 @@ def build_question_definition(
                 label="Something else",
                 semantic_value="other",
                 kind=UnderstandingOptionKind.OTHER,
+                localizations={
+                    LanguageCode.ENGLISH: "Something else",
+                    LanguageCode.HINDI: "कुछ और",
+                },
             ),
             _option_definition(
                 question_fingerprint,
                 label="I'm not sure",
                 semantic_value="unsure",
                 kind=UnderstandingOptionKind.UNSURE,
+                localizations={
+                    LanguageCode.ENGLISH: "I'm not sure",
+                    LanguageCode.HINDI: "मुझे पक्का नहीं पता",
+                },
             ),
         ]
     )
@@ -92,6 +102,10 @@ def build_question_definition(
         meaning_fingerprint=meaning_fingerprint,
         question_fingerprint=question_fingerprint,
         prompt=prompt,
+        prompt_localizations={
+            LanguageCode.ENGLISH: prompt,
+            LanguageCode.HINDI: _hindi_prompt(term, kind=kind),
+        },
         options=tuple(option_definitions),
         evidence_reference_ids=tuple(
             dict.fromkeys(item.reference_id for item in term.evidence)
@@ -239,6 +253,7 @@ def _option_definition(
     label: str,
     semantic_value: str,
     kind: UnderstandingOptionKind,
+    localizations: dict[LanguageCode, str],
 ) -> OptionDefinition:
     option_hash = _hash(
         {
@@ -253,9 +268,55 @@ def _option_definition(
             id=f"option-{option_hash[:24]}",
             label=label,
             kind=kind,
+            localizations=localizations,
         ),
         semantic_value=semantic_value,
     )
+
+
+def _option_localizations(
+    term: AgreementTerm,
+    label: str,
+    kind: UnderstandingOptionKind,
+) -> dict[LanguageCode, str]:
+    result = {LanguageCode.ENGLISH: label}
+    hindi = term.localizations.get(LanguageCode.HINDI)
+    if hindi is None:
+        return result
+    if kind == UnderstandingOptionKind.RECORDED_MEANING:
+        result[LanguageCode.HINDI] = hindi.summary
+        return result
+    for position in term.participant_positions:
+        if position.summary != label:
+            continue
+        localized = next(
+            (
+                item.summary
+                for item in hindi.participant_positions
+                if item.participant_id == position.participant_id
+            ),
+            None,
+        )
+        if localized:
+            result[LanguageCode.HINDI] = localized
+        break
+    return result
+
+
+def _hindi_prompt(term: AgreementTerm, *, kind: UnderstandingQuestionKind) -> str:
+    if kind == UnderstandingQuestionKind.UNDERSTANDING_CHECK:
+        return "कौन-सा कथन आपकी समझ से मेल खाता है?"
+    prompts = {
+        "scope.work": "आपकी समझ में कौन-सा काम शामिल था?",
+        "price.amount": "आपकी समझ में कितनी कीमत तय हुई थी?",
+        "materials.inclusion": "दर्ज कीमत में क्या शामिल होगा?",
+        "timing.start": "आपकी समझ में काम कब शुरू होगा?",
+        "completion.deadline": "आपकी समझ में काम कब पूरा होगा?",
+        "payment.timing": "आपकी समझ में भुगतान कब करना होगा?",
+        "responsibilities.assignment": "इसकी जिम्मेदारी किसकी थी?",
+        "additional_work.policy": "अतिरिक्त काम या खर्च से पहले क्या होना चाहिए?",
+    }
+    return prompts.get(term.analysis_item_key, "आपकी समझ में क्या तय हुआ था?")
 
 
 def _hash(value: object) -> str:

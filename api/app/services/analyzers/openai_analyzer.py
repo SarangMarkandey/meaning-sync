@@ -89,7 +89,8 @@ class OpenAIAgreementAnalyzer:
         except openai.APITimeoutError as exc:
             raise AnalysisFailure(
                 AnalysisErrorCode.TIMEOUT,
-                "Live analysis took too long. Please try again.",
+                "Live analysis took too long. Your conversation is saved; "
+                "please try again.",
                 retryable=True,
                 status_code=504,
             ) from exc
@@ -134,7 +135,7 @@ class OpenAIAgreementAnalyzer:
             )
         return AsyncOpenAI(
             api_key=key.get_secret_value(),
-            timeout=self._settings.openai_request_timeout_seconds,
+            timeout=self._settings.openai_analysis_timeout_seconds,
             max_retries=0,
         )
 

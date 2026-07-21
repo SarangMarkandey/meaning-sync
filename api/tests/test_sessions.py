@@ -274,3 +274,35 @@ def test_two_party_confirmation_and_receipt_preserve_gaps(
     assert states[AgreementTopic.MATERIALS] == MeaningState.CONFLICTING
     assert states[AgreementTopic.COMPLETION] == MeaningState.NOT_DISCUSSED
     assert len(receipt.confirmations) == 2
+    assert len(receipt.integrity_hash) == 64
+
+
+def test_bilingual_demo_receipt_updates_both_localized_meanings(
+    service: SessionService,
+) -> None:
+    created = service.create_demo(
+        ParticipantLanguages(hirer=LanguageCode.HINDI, worker=LanguageCode.ENGLISH)
+    )
+    service.submit_consent(created.id, "hirer", True)
+    service.submit_consent(created.id, "worker", True)
+    analyzed = analyze(service, created.id)
+    service.begin_clarification(created.id)
+    question = analyzed.clarification_questions[0]
+    service.answer(created.id, question.id, "hirer", "पुर्जों का खर्च अलग है")
+    resolved = service.answer(
+        created.id, question.id, "worker", "Parts are charged separately"
+    )
+    assert resolved.resolved is True
+    assert resolved.term is not None
+    assert (
+        resolved.term.localizations[LanguageCode.ENGLISH].summary
+        == "Parts are charged separately"
+    )
+    assert (
+        resolved.term.localizations[LanguageCode.HINDI].summary == "पुर्जों का खर्च अलग है"
+    )
+    service.confirm(created.id, "hirer", True, "मैंने साझा समझ की समीक्षा की।")
+    service.confirm(created.id, "worker", True, "I reviewed the shared meaning.")
+    receipt = service.create_receipt(created.id)
+    assert receipt.disclaimer_hi.startswith("MeaningSync स्पष्टता रसीद")
+    assert len(receipt.integrity_hash) == 64

@@ -30,6 +30,7 @@ from app.services.transcriptions import (
     OpenAIRealtimeSessionInitializer,
     RealtimeTranscriptionService,
 )
+from app.services.translation import OpenAITranslationService
 
 
 @asynccontextmanager
@@ -63,6 +64,7 @@ async def lifespan(application: FastAPI):
         repository=repository,
         clarification_attempt_limit=settings.meaningsync_clarification_attempt_limit,
         audio_configuration=audio_configuration,
+        translation_service=OpenAITranslationService(settings=settings),
     )
     application.state.realtime_transcription_service = RealtimeTranscriptionService(
         OpenAIRealtimeSessionInitializer(settings),
@@ -93,7 +95,7 @@ app = FastAPI(
     description=(
         "Deterministic demo and choice-based live agreement understanding checks."
     ),
-    version="0.4.0",
+    version="0.5.0",
     lifespan=lifespan,
 )
 

@@ -19,11 +19,13 @@ import {
 } from "@/lib/api";
 import {
   otherRole,
+  participantLabel,
   presentationFor,
   roleLabel,
 } from "@/lib/flow-presentation";
 import { getAnyLiveAccess, getLiveAccess } from "@/lib/live-access";
 import { useScrollToTop } from "@/lib/use-scroll-to-top";
+import { t } from "@/lib/i18n";
 
 const roles: PartyRole[] = ["hirer", "worker"];
 const requestId = () =>
@@ -51,12 +53,20 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
   const [session, setSession] = useState<LiveSessionView | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
   const [composerRole, setComposerRole] = useState<PartyRole>("hirer");
   const [message, setMessage] = useState("");
   const [selectedOption, setSelectedOption] = useState("");
   const [otherText, setOtherText] = useState("");
   const [changeItem, setChangeItem] = useState("");
+  const [handoffComplete, setHandoffComplete] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.sessionStorage.getItem(
+        `meaningsync-name-handoff:${sessionId}`,
+      ) === "complete",
+  );
 
   useScrollToTop(
     session
@@ -85,7 +95,7 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
       if (next.participation_mode === "separate_devices" && next.viewer_role) {
         setComposerRole(next.viewer_role);
       }
-      setError(null);
+      setLoadError(null);
     } catch (caught) {
       if (
         caught instanceof MeaningSyncApiError &&
@@ -99,7 +109,7 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
       ) {
         setSession(null);
       }
-      setError(
+      setLoadError(
         caught instanceof Error
           ? caught.message
           : "This Live session could not be loaded.",
@@ -120,11 +130,11 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
 
   const mutate = async (operation: () => Promise<LiveSessionView>) => {
     setSaving(true);
-    setError(null);
+    setOperationError(null);
     try {
       setSession(await operation());
     } catch (caught) {
-      setError(
+      setOperationError(
         caught instanceof MeaningSyncApiError
           ? caught.message
           : "MeaningSync could not complete that step.",
@@ -145,7 +155,7 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
         <section className="session-recovery" role="alert">
           <span>Session unavailable</span>
           <h1>We could not open this Live session.</h1>
-          <p>{error}</p>
+          <p>{loadError}</p>
           <div>
             <Link className="button primary" href="/live/setup">Start a new session</Link>
             <button className="button secondary" type="button" onClick={() => { setLoading(true); void load(); }}>Try again</button>
@@ -156,12 +166,52 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
   }
 
   const version = currentVersion(session);
+  const error = operationError ?? loadError;
   const presentation = presentationFor(session);
   const activeQuestion = session.guidance.active_question_id
     ? session.questions.find(
         (question) => question.id === session.guidance.active_question_id,
       ) ?? null
     : null;
+  const flowLanguage = session.participants.find(
+    (participant) =>
+      participant.role ===
+      (session.active_participant_id ?? session.viewer_role ?? session.creator_role),
+  )?.language ?? "en";
+
+  const sharedParticipantRole = otherRole(session.creator_role);
+  const sharedParticipant = session.participants.find(
+    (participant) => participant.role === sharedParticipantRole,
+  );
+  if (
+    session.participation_mode === "same_device" &&
+    !handoffComplete &&
+    !sharedParticipant?.display_name
+  ) {
+    const participantRole = sharedParticipantRole;
+    return (
+      <SharedDeviceNameHandoff
+        role={participantRole}
+        saving={saving}
+        onSubmit={(displayName) =>
+          void mutate(async () => {
+            const next = await api.updateParticipantProfile(
+              session.id,
+              displayName,
+              requestId(),
+              tokenFor(participantRole),
+            );
+            window.sessionStorage.setItem(
+              `meaningsync-name-handoff:${sessionId}`,
+              "complete",
+            );
+            setHandoffComplete(true);
+            return next;
+          })
+        }
+      />
+    );
+  }
 
   return (
     <main className="app-shell">
@@ -169,6 +219,7 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
       <section className="guided-flow-page conversation-first-flow">
         <LiveProgress
           currentStage={presentation.stage}
+          language={flowLanguage}
           explanation={
             presentation.stage === "conversation"
               ? "Add messages naturally, then both people mark themselves ready."
@@ -179,7 +230,7 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
                   : "The shared record is complete."
           }
         />
-        {error ? <div className="guided-error" role="alert"><p>{error}</p><button className="text-action" type="button" onClick={() => void load()}>Refresh</button></div> : null}
+        {error ? <div className="guided-error" role="alert"><p>{error}</p><button className="text-action" type="button" onClick={() => { setOperationError(null); void load(); }}>Dismiss and refresh</button></div> : null}
 
         {session.stage === "analyzing" ? (
           <AnalysisLoading />
@@ -347,7 +398,7 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
                 );
                 router.push(`/live/${encodeURIComponent(session.id)}/receipt`);
               } catch (caught) {
-                setError(caught instanceof Error ? caught.message : "The receipt could not be created.");
+                setOperationError(caught instanceof Error ? caught.message : "The receipt could not be created.");
                 setSaving(false);
               }
             }}
@@ -406,13 +457,15 @@ function ConversationStep({
   const focusTerm = version?.terms.find(
     (term) => term.analysis_item_key === session.conversation_reentry_item_key,
   );
+  const composerParticipant = session.participants.find((item) => item.role === composerRole);
+  const composerLanguage = composerParticipant?.language ?? "en";
 
   return (
     <section className="guided-task conversation-step" aria-labelledby="conversation-title">
       <header className="guided-heading">
-        <p className="eyebrow">Conversation</p>
-        <h1 id="conversation-title">Talk about the agreement</h1>
-        <p>Have a normal service conversation, then review it together.</p>
+        <p className="eyebrow">{t(composerLanguage, "conversation")}</p>
+        <h1 id="conversation-title">{t(composerLanguage, "talkTitle")}</h1>
+        <p>{t(composerLanguage, "talkHelp")}</p>
       </header>
       <ConversationGuide />
       {focusTerm ? (
@@ -421,18 +474,41 @@ function ConversationStep({
           <span>{focusTerm.summary}</span>
         </div>
       ) : null}
-      <ChatMessageList messages={session.messages.map((item) => ({ id: item.message_id, role: item.speaker_id as PartyRole, roleName: roleLabel(item.speaker_id as PartyRole), text: item.effective_text ?? item.original_text, order: item.order, timestamp: item.timestamp, inputSource: item.input_source ?? "text", rawTranscript: item.raw_transcript, correctedText: item.corrected_text }))} />
+      <ChatMessageList
+        preferredLanguage={session.participants.find((item) => item.role === (session.viewer_role ?? composerRole))?.language ?? "en"}
+        onRetryTranslation={(messageId) => void api.retryMessageTranslation(session.id, messageId, requestId(), accessToken).then(onSession)}
+        messages={session.messages.map((item) => {
+          const speaker = session.participants.find((participant) => participant.id === item.speaker_id);
+          const preferredLanguage = session.participants.find((participant) => participant.role === (session.viewer_role ?? composerRole))?.language ?? "en";
+          const translation = item.translations?.[preferredLanguage];
+          return {
+            id: item.message_id,
+            role: item.speaker_id as PartyRole,
+            roleName: speaker ? participantLabel(speaker) : roleLabel(item.speaker_id as PartyRole),
+            text: item.effective_text ?? item.original_text,
+            order: item.order,
+            timestamp: item.timestamp,
+            inputSource: item.input_source ?? "text",
+            rawTranscript: item.raw_transcript,
+            correctedText: item.corrected_text,
+            originalLanguage: item.original_language,
+            translatedText: translation?.translated_text,
+            translationStatus: translation?.status,
+            translationLanguage: translation?.target_language,
+          };
+        })}
+      />
       {!separate ? (
         <div className="composer-role-tabs" aria-label="Choose who is speaking">
           {roles.map((role) => (
-            <button className={composerRole === role ? "active" : ""} type="button" key={role} onClick={() => { setInputMode("type"); onComposerRole(role); }}>{roleLabel(role)}</button>
+            <button className={composerRole === role ? "active" : ""} type="button" key={role} onClick={() => { setInputMode("type"); onComposerRole(role); }}>{participantLabel(session.participants.find((item) => item.role === role)!)}</button>
           ))}
         </div>
       ) : null}
       <fieldset className="input-mode-picker">
         <legend>How would you like to contribute?</legend>
-        <button className={inputMode === "type" ? "active" : ""} type="button" aria-pressed={inputMode === "type"} onClick={() => setInputMode("type")}><strong>Type</strong><span>Send text messages.</span></button>
-        <button className={inputMode === "speak" ? "active" : ""} type="button" aria-pressed={inputMode === "speak"} disabled={!canCompose || saving} onClick={() => setInputMode("speak")}><strong>Speak</strong><span>Use your microphone and review each transcript before adding it.</span></button>
+        <button className={inputMode === "type" ? "active" : ""} type="button" aria-pressed={inputMode === "type"} onClick={() => setInputMode("type")}><strong>{t(composerLanguage, "type")}</strong><span>Send text messages.</span></button>
+        <button className={inputMode === "speak" ? "active" : ""} type="button" aria-pressed={inputMode === "speak"} disabled={!canCompose || saving} onClick={() => setInputMode("speak")}><strong>{t(composerLanguage, "speak")}</strong><span>Use your microphone and review each transcript before adding it.</span></button>
       </fieldset>
       {inputMode === "type" ? (
         <div className="chat-composer">
@@ -526,6 +602,8 @@ function UnderstandingStep({
     (term) => term.state === "conflicting" || term.state === "stated_by_one",
   );
   const actor = session.active_participant_id;
+  const actorParticipant = session.participants.find((item) => item.role === actor);
+  const actorLanguage = actorParticipant?.language ?? "en";
   const separateWaiting =
     session.participation_mode === "separate_devices" &&
     actor &&
@@ -563,7 +641,7 @@ function UnderstandingStep({
           </p>
         </div>
       ) : null}
-      <AgreementMap terms={version.terms} roleMode="live" onDiscussMissing={onDiscuss} />
+      <AgreementMap terms={version.terms} roleMode="live" language={actorLanguage} onDiscussMissing={onDiscuss} />
 
       {question ? (
         <div className="decision-panel">
@@ -589,8 +667,8 @@ function UnderstandingStep({
                   <span>Only {roleLabel(actor)} should make the next private choice.</span>
                 </div>
               ) : null}
-              <p className="eyebrow">Private choice · {roleLabel(actor)}</p>
-              <h2>{decisionPrompt}</h2>
+              <p className="eyebrow">Private choice · {actorParticipant ? participantLabel(actorParticipant) : roleLabel(actor)}</p>
+              <h2 lang={actorLanguage}>{question.prompt_localizations?.[actorLanguage] ?? decisionPrompt}</h2>
               <p>Your choice stays hidden until everyone addressed by this question has answered.</p>
               <fieldset className="choice-list">
                 <legend>Choose what should be recorded</legend>
@@ -602,7 +680,7 @@ function UnderstandingStep({
                         ? decisionTerm?.state === "stated_by_one"
                           ? "Leave this unresolved"
                           : "We have not agreed on this yet"
-                        : option.label}
+                        : option.localizations?.[actorLanguage] ?? option.label}
                     </span>
                   </label>
                 ))}
@@ -612,7 +690,7 @@ function UnderstandingStep({
               ) : null}
               <div className="guided-actions">
                 <button className="button primary" type="button" disabled={saving || !selectedOption || (question.options.find((item) => item.id === selectedOption)?.kind === "other" && otherText.trim().length < 2)} onClick={onSubmitChoice}>Submit my choice</button>
-                <button className="text-action" type="button" disabled={saving} onClick={onLeave}>Leave unresolved</button>
+                <button className="text-action" type="button" disabled={saving} onClick={onLeave}>{t(actorLanguage, "leaveUnresolved")}</button>
               </div>
             </>
           ) : null}
@@ -657,14 +735,16 @@ function detectedEvidenceCurrencies(messages: LiveSessionView["messages"]) {
 
 function ConfirmStep({ session, version, saving, changeItem, onChangeItem, onConfirm, onReceipt }: { session: LiveSessionView; version: AgreementVersion; saving: boolean; changeItem: string; onChangeItem: (value: string) => void; onConfirm: (decision: "confirm" | "request_change") => void; onReceipt: () => void }) {
   const actor = session.active_participant_id;
+  const actorParticipant = session.participants.find((item) => item.role === actor);
+  const actorLanguage = actorParticipant?.language ?? "en";
   const confirmedRoles = new Set(session.confirmations.filter((item) => !item.invalidated_at && item.agreement_version_id === version.id).map((item) => item.participant_id));
   const bothConfirmed = confirmedRoles.size === 2;
   const canAct = actor && (session.participation_mode !== "separate_devices" || session.viewer_role === actor);
   return (
     <section className="guided-task confirm-step">
       <header className="guided-heading"><p className="eyebrow">Confirm</p><h1>Confirm this shared record</h1><p>Each person confirms this same latest summary. Open points stay open.</p></header>
-      <ConfirmationSummary terms={version.terms} />
-      <div className="confirmation-status-row">{roles.map((role) => <div key={role}><span>{roleLabel(role)}</span><strong>{confirmedRoles.has(role) ? "Confirmed" : actor === role ? "Reviewing now" : "Waiting"}</strong></div>)}</div>
+      <ConfirmationSummary terms={version.terms} language={actorLanguage} />
+      <div className="confirmation-status-row">{roles.map((role) => { const participant = session.participants.find((item) => item.role === role); return <div key={role}><span>{participant ? participantLabel(participant) : roleLabel(role)}</span><strong>{confirmedRoles.has(role) ? "Confirmed" : actor === role ? "Reviewing now" : "Waiting"}</strong></div>; })}</div>
       {bothConfirmed && (session.participation_mode !== "separate_devices" || session.viewer_role === session.creator_role) ? (
         <button className="button primary" type="button" disabled={saving || (session.participation_mode === "separate_devices" && session.viewer_role !== session.creator_role)} onClick={onReceipt}>Create clarity receipt <span>→</span></button>
       ) : bothConfirmed ? (
@@ -672,9 +752,9 @@ function ConfirmStep({ session, version, saving, changeItem, onChangeItem, onCon
       ) : canAct && actor ? (
         <div className="confirmation-actions">
           {session.participation_mode === "same_device" ? <p className="handoff-notice"><strong>Pass this screen to {roleLabel(actor)}</strong></p> : null}
-          <h2>{roleLabel(actor)}, does this record match what you mean?</h2>
-          <p>I confirm that this reflects my understanding.</p>
-          <button className="button primary" type="button" disabled={saving} onClick={() => onConfirm("confirm")}>Confirm my understanding</button>
+          <h2>{actorParticipant ? participantLabel(actorParticipant) : roleLabel(actor)}, does this record match what you mean?</h2>
+          <p lang={actorLanguage}>{t(actorLanguage, "confirmationStatement")}</p>
+          <button className="button primary" type="button" disabled={saving} onClick={() => onConfirm("confirm")}>{t(actorLanguage, "confirmMine")}</button>
           <label htmlFor="change-item">Something needs to change<select id="change-item" value={changeItem} onChange={(event) => onChangeItem(event.target.value)}><option value="">Choose an item</option>{version.terms.map((term) => <option key={term.analysis_item_key} value={term.analysis_item_key}>{term.label}</option>)}</select></label>
           <button className="button secondary" type="button" disabled={saving || !changeItem} onClick={() => onConfirm("request_change")}>Return to conversation</button>
         </div>
@@ -685,4 +765,27 @@ function ConfirmStep({ session, version, saving, changeItem, onChangeItem, onCon
 
 function LoadingSession() {
   return <main className="app-shell"><LiveBrandBar /><div className="guided-loading" role="status"><span /> Loading this conversation…</div></main>;
+}
+
+function SharedDeviceNameHandoff({ role, saving, onSubmit }: { role: PartyRole; saving: boolean; onSubmit: (displayName: string) => void }) {
+  const [displayName, setDisplayName] = useState("");
+  return (
+    <main className="app-shell">
+      <LiveBrandBar />
+      <section className="guided-flow-page">
+        <LiveProgress currentStage="participation" explanation="Each person provides only their own optional display name." />
+        <article className="join-status-card">
+          <p className="eyebrow">Private handoff</p>
+          <h1>Pass this screen to the {roleLabel(role)}</h1>
+          <p>This name is for display only. MeaningSync does not verify identity.</p>
+          <label className="setup-name" htmlFor="shared-display-name">
+            What should MeaningSync call you?
+            <input id="shared-display-name" maxLength={80} value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder={roleLabel(role)} />
+            <small>Optional — leave blank to use {roleLabel(role)}.</small>
+          </label>
+          <button className="button primary" type="button" disabled={saving} onClick={() => onSubmit(displayName)}>{saving ? "Saving…" : "Continue privately"} <span>→</span></button>
+        </article>
+      </section>
+    </main>
+  );
 }

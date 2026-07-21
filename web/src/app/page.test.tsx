@@ -15,14 +15,15 @@ describe("MeaningSync landing page", () => {
   it("routes Demo and Live actions to their setup flows", () => {
     render(<Home />);
 
-    expect(screen.getByRole("link", { name: /Try Demo/ })).toHaveAttribute(
+    expect(screen.getAllByRole("link", { name: /Try the demo/ })[0]).toHaveAttribute(
       "href",
       "/demo/setup",
     );
-    expect(screen.getByRole("link", { name: /Start Live Session/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Start a live conversation/ })).toHaveAttribute(
       "href",
       "/live/setup",
     );
-    expect(screen.getByLabelText("Agreement map preview")).toBeVisible();
+    expect(screen.getByLabelText("Example agreement map")).toBeVisible();
+    expect(screen.getByText(/English and Hindi · Text and audio/)).toBeVisible();
   });
 });

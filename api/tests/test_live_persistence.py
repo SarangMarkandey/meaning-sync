@@ -89,7 +89,7 @@ def test_legacy_state_payload_upgrades_with_audio_defaults(
     engine.dispose()
 
     recovered = repository(database_url).load(created.id).state
-    assert recovered.state_schema_version == 4
+    assert recovered.state_schema_version == 5
     assert recovered.currency == CurrencyCode.INR
     assert recovered.creator_role == PartyRole.HIRER
     assert recovered.participant_readiness == {

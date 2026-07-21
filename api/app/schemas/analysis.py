@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class StrictModel(BaseModel):
@@ -89,6 +89,18 @@ class AnalysisStatus(StrEnum):
     PARTIAL = "partial"
 
 
+class TranslationStatus(StrEnum):
+    NOT_REQUIRED = "not_required"
+    PENDING = "pending"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class SemanticEquivalenceStatus(StrEnum):
+    EQUIVALENT = "equivalent"
+    REVIEW_REQUIRED = "review_required"
+
+
 class AnalysisWarningCode(StrEnum):
     CLARIFICATION_UNAVAILABLE = "clarification_unavailable"
 
@@ -100,6 +112,48 @@ class AnalysisParticipant(StrictModel):
     id: Identifier
     role: PartyRole
     language: LanguageCode
+    display_name: str | None = Field(default=None, max_length=80)
+
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def normalize_display_name(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+
+class MessageTranslation(StrictModel):
+    source_language: LanguageCode
+    target_language: LanguageCode
+    status: TranslationStatus
+    translated_text: str | None = Field(default=None, min_length=1, max_length=2000)
+    semantic_equivalence_status: SemanticEquivalenceStatus | None = None
+    preserved_amounts: list[str] = Field(default_factory=list, max_length=20)
+    preserved_currencies: list[str] = Field(default_factory=list, max_length=20)
+    preserved_dates: list[str] = Field(default_factory=list, max_length=20)
+    preserved_quantities: list[str] = Field(default_factory=list, max_length=20)
+    warnings: list[str] = Field(default_factory=list, max_length=10)
+    model: str = Field(min_length=1, max_length=120)
+    prompt_version: str = Field(min_length=1, max_length=80)
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def validate_state(self) -> MessageTranslation:
+        if self.source_language == self.target_language:
+            if self.status != TranslationStatus.NOT_REQUIRED:
+                raise ValueError("same-language translation must be not required")
+        elif self.status == TranslationStatus.READY:
+            if (
+                self.translated_text is None
+                or self.semantic_equivalence_status
+                != SemanticEquivalenceStatus.EQUIVALENT
+            ):
+                raise ValueError(
+                    "ready translation requires equivalent translated text"
+                )
+        elif self.translated_text is not None:
+            raise ValueError("unready translation cannot publish translated text")
+        return self
 
 
 class AnalysisMessage(StrictModel):
@@ -119,6 +173,9 @@ class AnalysisMessage(StrictModel):
     audio_started_at: datetime | None = None
     audio_completed_at: datetime | None = None
     audio_duration_seconds: float | None = Field(default=None, gt=0, le=3600)
+    translations: dict[LanguageCode, MessageTranslation] = Field(
+        default_factory=dict, max_length=1
+    )
 
     @model_validator(mode="after")
     def validate_provenance(self) -> AnalysisMessage:
@@ -145,6 +202,12 @@ class AnalysisMessage(StrictModel):
             raise ValueError("audio transcripts require complete provenance")
         elif self.audio_completed_at <= self.audio_started_at:
             raise ValueError("audio completion must follow its start")
+        if any(
+            target != translation.target_language
+            or translation.source_language != self.original_language
+            for target, translation in self.translations.items()
+        ):
+            raise ValueError("translation keys and languages must match the message")
         return self
 
 
@@ -153,6 +216,21 @@ class ParticipantPosition(StrictModel):
     role: PartyRole
     summary: str = Field(min_length=1, max_length=500)
     evidence_message_ids: list[Identifier] = Field(min_length=1, max_length=20)
+
+
+class LocalizedParticipantPosition(StrictModel):
+    participant_id: Identifier
+    summary: str = Field(min_length=1, max_length=500)
+
+
+class AgreementTermLocalization(StrictModel):
+    language: LanguageCode
+    label: str = Field(min_length=1, max_length=100)
+    summary: str = Field(min_length=1, max_length=600)
+    participant_positions: list[LocalizedParticipantPosition] = Field(
+        default_factory=list, max_length=2
+    )
+    provenance: str = Field(default="deterministic", min_length=1, max_length=120)
 
 
 class EvidenceReference(StrictModel):
@@ -198,6 +276,9 @@ class AgreementTerm(StrictModel):
     evidence_message_ids: list[Identifier] = Field(default_factory=list, max_length=40)
     evidence: list[EvidenceReference] = Field(default_factory=list, max_length=40)
     clarification_target: Identifier | None = None
+    localizations: dict[LanguageCode, AgreementTermLocalization] = Field(
+        default_factory=dict, max_length=2
+    )
 
     @model_validator(mode="after")
     def validate_contract(self) -> AgreementTerm:
@@ -227,6 +308,11 @@ class AgreementTerm(StrictModel):
             for status in self.participant_confirmations.values()
         ):
             raise ValueError("aligned terms require both participants to be confirmed")
+        if any(
+            language != localization.language
+            for language, localization in self.localizations.items()
+        ):
+            raise ValueError("localization keys must match their language")
         return self
 
 
@@ -267,12 +353,6 @@ class AgreementAnalysisRequest(StrictModel):
             raise ValueError("participant IDs must be unique")
         if set(roles) != set(PartyRole):
             raise ValueError("participants must include one hirer and one worker")
-        if any(
-            participant.language != LanguageCode.ENGLISH
-            for participant in self.participants
-        ):
-            raise ValueError("this milestone supports English participants only")
-
         messages_by_id = {message.message_id: message for message in self.messages}
         if len(messages_by_id) != len(self.messages):
             raise ValueError("message IDs must be unique")
@@ -345,6 +425,19 @@ class ModelParticipantPosition(StrictModel):
     evidence_message_ids: list[Identifier] = Field(min_length=1, max_length=20)
 
 
+class ModelLocalizedParticipantPosition(StrictModel):
+    participant_id: Identifier
+    summary: str = Field(min_length=1, max_length=500)
+
+
+class ModelAgreementTermLocalization(StrictModel):
+    language: LanguageCode
+    summary: str = Field(min_length=1, max_length=600)
+    participant_positions: list[ModelLocalizedParticipantPosition] = Field(
+        default_factory=list, max_length=2
+    )
+
+
 class ModelAgreementTerm(StrictModel):
     item_key: Identifier
     topic: AgreementTopic
@@ -356,6 +449,9 @@ class ModelAgreementTerm(StrictModel):
     )
     evidence_message_ids: list[Identifier] = Field(default_factory=list, max_length=40)
     clarification_question: str | None = Field(default=None, max_length=500)
+    localizations: list[ModelAgreementTermLocalization] = Field(
+        default_factory=list, max_length=2
+    )
 
 
 class AgreementAnalysisModelOutput(StrictModel):

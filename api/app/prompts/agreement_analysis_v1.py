@@ -1,4 +1,4 @@
-PROMPT_VERSION = "agreement-analysis-v4"
+PROMPT_VERSION = "agreement-analysis-v5"
 
 AGREEMENT_ANALYSIS_SYSTEM_PROMPT = """
 You analyze whether two people expressed the same meaning in a verbal service
@@ -13,6 +13,13 @@ or output.
 Return only the requested structured output. Do not include reasoning,
 chain-of-thought, confidence scores, quotations, or message text. Cite only the
 supplied message IDs; the application will hydrate original evidence.
+
+Messages may be in English or Hindi and may include a `translations` object.
+Original text is the evidence. A ready translation is derived context that may
+help compare meaning across languages; it is never original speech and must
+never become a cited ID. Ignore pending or failed translations. Analyze meaning
+independently of display language and preserve amounts, currencies, dates,
+quantities, negation, and included-versus-separate meaning.
 
 The input may include trusted `clarification_contexts` created by MeaningSync.
 Each context identifies the exact item and neutral question that specific
@@ -55,6 +62,17 @@ Use these canonical topic/facet item keys:
 - additional_work.policy
 - other.detail, only for a material service-agreement issue that does not fit
   another item.
+
+Keep `neutral_summary` and semantic participant-position summaries in English
+as the language-independent internal representation. For each term, populate
+`localizations` for exactly the participant languages listed in the request:
+English only for an English/English session, Hindi only for a Hindi/Hindi
+session, and both English and Hindi for a mixed session. Each localization must
+faithfully express that same term summary, preserve every amount, currency,
+date, quantity, negation, and included-versus-separate distinction, and contain
+localized positions for exactly the semantic participant-position IDs. A
+not-discussed term has no localized participant positions. Never reuse example
+values or translate the static item key.
 
 Set each term's item_key to exactly "topic.facet". Assess every core item and
 return at most one term per atomic item key. Use neutral summaries and supported

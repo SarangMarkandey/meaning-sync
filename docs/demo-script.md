@@ -2,7 +2,7 @@
 
 ## Deterministic Demo (no OpenAI request)
 
-1. Choose **Try Demo**. Show English/INR Preferences and shared-device Participation.
+1. Choose **Try the demo**, then select English or the prepared Hindi/English INR preset. Show shared-device Participation.
 2. Accept both participants’ text/data consent and show the prepared English Homeowner/Electrician evidence.
 3. In Conversation, point out that the evidence—not a form—drives the comparison.
 4. Show Matches for scope, ₹1,200 labour, and today’s start; open each evidence disclosure.

@@ -3,6 +3,7 @@ import type {
   MeaningState,
   NotApplicableProposal,
   PartyRole,
+  LanguageCode,
 } from "@/lib/api";
 import { roleLabel } from "@/lib/flow-presentation";
 
@@ -36,16 +37,19 @@ export function GuidedTermRow({
   term,
   showState = false,
   proposal,
+  language = "en",
 }: {
   term: AgreementTerm;
   showState?: boolean;
   proposal?: NotApplicableProposal;
+  language?: LanguageCode;
 }) {
+  const localized = term.localizations?.[language];
   return (
     <article className="guided-term-row" data-item={term.analysis_item_key}>
       <div>
-        <p>{term.label}</p>
-        <strong>{term.summary}</strong>
+        <p lang={language}>{localized?.label ?? term.label}</p>
+        <strong lang={language}>{localized?.summary ?? term.summary}</strong>
         {showState && <span className={`plain-state ${term.state}`}>{stateLabels[term.state]}</span>}
       </div>
       <EvidenceDisclosure term={term} />
@@ -59,11 +63,13 @@ export function GuidedTermList({
   emptyMessage = "Nothing to show here.",
   showState = false,
   proposals = [],
+  language = "en",
 }: {
   terms: AgreementTerm[];
   emptyMessage?: string;
   showState?: boolean;
   proposals?: NotApplicableProposal[];
+  language?: LanguageCode;
 }) {
   if (!terms.length) return <p className="guided-empty">{emptyMessage}</p>;
   return (
@@ -76,6 +82,7 @@ export function GuidedTermList({
           proposal={proposals.find(
             (item) => item.item_key === term.analysis_item_key,
           )}
+          language={language}
         />
       ))}
     </div>
@@ -107,14 +114,14 @@ function NotApplicableNote({
   );
 }
 
-export function ParticipantPositions({ term }: { term: AgreementTerm }) {
+export function ParticipantPositions({ term, language = "en" }: { term: AgreementTerm; language?: LanguageCode }) {
   if (!term.participant_positions.length) return null;
   return (
     <div className="guided-positions">
       {term.participant_positions.map((position) => (
         <div key={position.participant_id}>
           <span>{roleLabel(position.role)}</span>
-          <p>{position.summary}</p>
+          <p lang={language}>{term.localizations?.[language]?.participant_positions.find((item) => item.participant_id === position.participant_id)?.summary ?? position.summary}</p>
         </div>
       ))}
     </div>

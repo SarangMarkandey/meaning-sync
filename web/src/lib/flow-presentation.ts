@@ -2,6 +2,7 @@ import type {
   LiveSessionStage,
   LiveSessionView,
   PartyRole,
+  SessionParticipant,
 } from "@/lib/api";
 
 export type VisibleFlowStage =
@@ -42,9 +43,18 @@ export function presentLiveStage(stage: LiveSessionStage): VisibleFlowStage {
 export function roleLabel(
   role: PartyRole,
   mode: "live" | "demo" = "live",
+  language: "en" | "hi" = "en",
 ) {
   if (mode === "demo") return role === "hirer" ? "Homeowner" : "Electrician";
+  if (language === "hi") return role === "hirer" ? "ग्राहक" : "सेवा प्रदाता";
   return role === "hirer" ? "Customer" : "Service provider";
+}
+
+export function participantLabel(
+  participant: Pick<SessionParticipant, "role" | "display_name" | "language">,
+): string {
+  const role = roleLabel(participant.role, "live", participant.language);
+  return participant.display_name ? `${participant.display_name} · ${role}` : role;
 }
 
 export function otherRole(role: PartyRole): PartyRole {

@@ -12,20 +12,14 @@ vi.mock("next/navigation", () => ({
 describe("DemoSetup", () => {
   beforeEach(() => push.mockReset());
 
-  it("shows independent participant controls defaulted to English", () => {
+  it("shows deterministic English and bilingual presets", () => {
     render(<DemoSetup />);
 
     expect(
-      screen.getByRole("heading", { name: "Choose the conversation languages" }),
+      screen.getByRole("heading", { name: "Choose a prepared demo" }),
     ).toBeVisible();
-    expect(screen.getByText("Participant 1")).toBeVisible();
-    expect(screen.getByText("Participant 2")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Homeowner" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Electrician" })).toBeVisible();
-    const [homeownerLanguage, electricianLanguage] =
-      screen.getAllByLabelText("Language");
-    expect(homeownerLanguage).toHaveValue("en");
-    expect(electricianLanguage).toHaveValue("en");
+    expect(screen.getByLabelText(/English Demo/)).toBeChecked();
+    expect(screen.getByLabelText(/English \/ Hindi Demo/)).not.toBeChecked();
     expect(screen.getByText("English ↔ English")).toBeVisible();
     expect(screen.getAllByText("Demo setup")).toHaveLength(1);
   });
@@ -39,16 +33,15 @@ describe("DemoSetup", () => {
     );
   });
 
-  it("does not allow an unsupported Hindi flow to start", () => {
+  it("starts the prepared Hindi and English flow", () => {
     render(<DemoSetup />);
 
-    const [homeownerLanguage] = screen.getAllByLabelText("Language");
-    for (const option of screen.getAllByRole("option", { name: /Hindi/ })) {
-      expect(option).toBeDisabled();
-    }
-    fireEvent.change(homeownerLanguage, { target: { value: "hi" } });
-    expect(screen.getByRole("button", { name: /Start Demo/ })).toBeDisabled();
-    expect(push).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText(/English \/ Hindi Demo/));
+    expect(screen.getByText("Hindi ↔ English")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Start Demo/ }));
+    expect(push).toHaveBeenCalledWith(
+      "/demo?hirer_language=hi&worker_language=en&currency=INR",
+    );
   });
 
   it("links back to the homepage", () => {

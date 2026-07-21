@@ -30,11 +30,14 @@ export function LiveSetup() {
   });
   const [currency, setCurrency] = useState<CurrencyCode>("INR");
   const [creatorRole, setCreatorRole] = useState<PartyRole>("hirer");
+  const [displayName, setDisplayName] = useState("");
   const [participationMode, setParticipationMode] =
     useState<LiveParticipationMode>("same_device");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const supported = languages.hirer === "en" && languages.worker === "en";
+  const supported = [languages.hirer, languages.worker].every((item) =>
+    ["en", "hi"].includes(item),
+  );
 
   useScrollToTop(`live-setup:${step}`);
 
@@ -50,8 +53,18 @@ export function LiveSetup() {
     try {
       const session = await api.createLiveSession({
         participants: [
-          { id: "hirer", role: "hirer", language: languages.hirer },
-          { id: "worker", role: "worker", language: languages.worker },
+          {
+            id: "hirer",
+            role: "hirer",
+            language: languages.hirer,
+            display_name: creatorRole === "hirer" ? displayName.trim() || null : null,
+          },
+          {
+            id: "worker",
+            role: "worker",
+            language: languages.worker,
+            display_name: creatorRole === "worker" ? displayName.trim() || null : null,
+          },
         ],
         messages: [],
         participation_mode: participationMode,
@@ -134,7 +147,7 @@ export function LiveSetup() {
                       }
                     >
                       <option value="en">English</option>
-                      <option value="hi" disabled>Hindi — Coming soon</option>
+                      <option value="hi">Hindi</option>
                     </select>
                   </article>
                 ))}
@@ -172,6 +185,20 @@ export function LiveSetup() {
                   </label>
                 ))}
               </fieldset>
+              <label className="setup-name" htmlFor="creator-display-name">
+                What should MeaningSync call you?
+                <input
+                  id="creator-display-name"
+                  maxLength={80}
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder={roleLabel(creatorRole)}
+                />
+                <small>
+                  Optional — leave blank to use {roleLabel(creatorRole)}. This is
+                  a display name, not identity verification.
+                </small>
+              </label>
               <fieldset className="live-mode-picker">
                 <legend>How will you take part?</legend>
                 <label>
