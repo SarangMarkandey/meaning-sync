@@ -196,6 +196,31 @@ def configured_settings(**overrides: Any) -> Settings:
     return Settings(_env_file=None, **values)
 
 
+def test_agreement_analysis_uses_its_longer_dedicated_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class CapturingClient:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "app.services.analyzers.openai_analyzer.AsyncOpenAI", CapturingClient
+    )
+    analyzer = OpenAIAgreementAnalyzer(
+        configured_settings(
+            openai_request_timeout_seconds=30,
+            openai_analysis_timeout_seconds=90,
+        )
+    )
+
+    analyzer._create_client()
+
+    assert captured["timeout"] == 90
+    assert captured["max_retries"] == 0
+
+
 def test_model_schema_nests_clarification_without_detached_references() -> None:
     schema = AgreementAnalysisModelOutput.model_json_schema()
     properties = schema["$defs"]["ModelAgreementTerm"]["properties"]
@@ -270,7 +295,9 @@ async def test_required_semantics_and_original_evidence_are_preserved() -> None:
         .evidence[0]
         .original_text.startswith("I will pay ₹1,200")
     )
-    assert terms[AgreementTopic.MATERIALS].evidence[1].speaker_name == "Electrician"
+    assert terms[AgreementTopic.MATERIALS].evidence[1].speaker_name == (
+        "Service provider"
+    )
 
 
 def test_unknown_or_wrong_speaker_evidence_is_rejected() -> None:
@@ -479,7 +506,14 @@ def _two_unresolved_price_terms() -> list[ModelAgreementTerm]:
 def test_request_validation_rejects_unsupported_or_invalid_conversations() -> None:
     request_data = conversation_request().model_dump(mode="json")
     request_data["participants"][1]["language"] = "hi"
-    with pytest.raises(ValidationError, match="English participants only"):
+    for message in request_data["messages"]:
+        if message["speaker_id"] == "worker":
+            message["original_language"] = "hi"
+    mixed = AgreementAnalysisRequest.model_validate(request_data)
+    assert mixed.participants[1].language == "hi"
+
+    request_data["messages"][1]["original_language"] = "en"
+    with pytest.raises(ValidationError, match="message language must match"):
         AgreementAnalysisRequest.model_validate(request_data)
 
     request_data = conversation_request().model_dump(mode="json")

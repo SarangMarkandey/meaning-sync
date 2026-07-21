@@ -12,8 +12,10 @@ class Settings(BaseSettings):
     meaningsync_cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-5.6"
+    openai_translation_model: str = "gpt-5.6"
     openai_store_responses: bool = False
     openai_request_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    openai_analysis_timeout_seconds: float = Field(default=90, gt=0, le=180)
     openai_transcription_model: str = "gpt-realtime-whisper"
     meaningsync_audio_consent_notice_version: str = "audio-transcription-v1"
     meaningsync_audio_max_turn_seconds: int = Field(default=60, ge=5, le=3600)

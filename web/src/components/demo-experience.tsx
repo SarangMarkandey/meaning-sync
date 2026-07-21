@@ -17,6 +17,7 @@ import {
   type SessionView,
 } from "@/lib/api";
 import { useScrollToTop } from "@/lib/use-scroll-to-top";
+import { t } from "@/lib/i18n";
 
 type Screen =
   | "consent"
@@ -118,11 +119,17 @@ export function DemoExperience({
     const question = session?.clarification_questions[0];
     if (!session || !question || !selectedAnswer) return;
     void perform(async () => {
+      const localizedAnswer =
+        activeLanguage === "hi"
+          ? selectedAnswer === "Parts are included"
+            ? "पुर्जे शामिल हैं"
+            : "पुर्जों का खर्च अलग है"
+          : selectedAnswer;
       const result = await api.answerClarification(
         session.id,
         question.id,
         activeParty,
-        selectedAnswer,
+        localizedAnswer,
       );
       setClarification(result);
       setSelectedAnswer("");
@@ -151,6 +158,7 @@ export function DemoExperience({
   const bothConsented = session
     ? Object.values(session.consent).every((status) => status === "accepted")
     : false;
+  const activeLanguage = participantLanguages[activeParty];
 
   return (
     <main className="app-shell">
@@ -231,14 +239,20 @@ export function DemoExperience({
         >
           <ConversationGuide />
           {session.transcript.length ? (
-            <ChatMessageList messages={session.transcript.map((turn, index) => ({
+            <ChatMessageList showAllTranslations={participantLanguages.hirer !== participantLanguages.worker} messages={session.transcript.map((turn, index) => {
+              const translation = Object.entries(turn.translations)[0];
+              return ({
               id: turn.id,
               role: turn.speaker,
               roleName: turn.speaker_name,
               text: turn.original_text,
               order: index + 1,
               timestamp: turn.timestamp,
-            }))} />
+              originalLanguage: turn.original_language,
+              translatedText: translation?.[1],
+              translationLanguage: translation?.[0] as LanguageCode | undefined,
+              translationStatus: translation ? "ready" : undefined,
+            });})} />
           ) : (
             <div className="empty-state">The prepared conversation is empty.</div>
           )}
@@ -258,7 +272,7 @@ export function DemoExperience({
           title="Check your shared understanding"
           subtitle="Review what matches, resolve any differences and leave anything undiscussed open."
         >
-          <AgreementMap terms={session.terms} roleMode="demo" />
+          <AgreementMap terms={session.terms} roleMode="demo" language={participantLanguages.hirer} />
           <button
             className="button primary full"
             onClick={openClarification}
@@ -281,7 +295,7 @@ export function DemoExperience({
                 <span>Answering as</span>
                 <strong>{roleNames[activeParty]}</strong>
               </div>
-              <h3>{session.clarification_questions[0].prompt}</h3>
+              <h3 lang={activeLanguage}>{activeLanguage === "hi" ? "क्या ₹1,200 में बदलने वाले पुर्जे शामिल हैं, या उनका खर्च अलग है?" : session.clarification_questions[0].prompt}</h3>
               {!clarification?.revealed &&
                 session.clarification_questions[0].options.map((option) => (
                   <label
@@ -297,7 +311,7 @@ export function DemoExperience({
                       checked={selectedAnswer === option}
                       onChange={() => setSelectedAnswer(option)}
                     />
-                    <span>{option}</span>
+                    <span lang={activeLanguage}>{activeLanguage === "hi" ? (option === "Parts are included" ? "पुर्जे शामिल हैं" : "पुर्जों का खर्च अलग है") : option}</span>
                     <i />
                   </label>
                 ))}
@@ -375,19 +389,30 @@ export function DemoExperience({
           title="Confirm this shared record"
           subtitle="Each person confirms separately. Unresolved and not-discussed points stay open."
         >
-          <ConfirmationSummary terms={session.terms} />
-          <div className="confirmation-actions">
+          <div className="demo-confirmation-reviews">
             {(["hirer", "worker"] as PartyRole[]).map((party) => {
               const confirmed = confirmedParties.includes(party);
               return (
-                <button
-                  key={party}
-                  onClick={() => confirmTeachback(party)}
-                  disabled={confirmed || loading}
-                >
-                  <span>{roleNames[party]}</span>
-                  <strong>{confirmed ? "Confirmed ✓" : "Confirm my understanding"}</strong>
-                </button>
+                <article key={party} lang={participantLanguages[party]}>
+                  <p className="eyebrow">{roleNames[party]}</p>
+                  <ConfirmationSummary
+                    terms={session.terms}
+                    language={participantLanguages[party]}
+                  />
+                  <p>{t(participantLanguages[party], "confirmationStatement")}</p>
+                  <button
+                    onClick={() => confirmTeachback(party)}
+                    disabled={confirmed || loading}
+                  >
+                    <strong>
+                      {confirmed
+                        ? participantLanguages[party] === "hi"
+                          ? "पुष्टि की गई ✓"
+                          : "Confirmed ✓"
+                        : t(participantLanguages[party], "confirmMine")}
+                    </strong>
+                  </button>
+                </article>
               );
             })}
           </div>
@@ -411,13 +436,29 @@ export function DemoExperience({
               <div>
                 <p>Session complete</p>
                 <h2>{receipt.title}</h2>
+                {participantLanguages.hirer !== participantLanguages.worker ? (
+                  <h3 lang="hi">स्पष्टता रसीद</h3>
+                ) : null}
                 <strong>MeaningSync Clarity Receipt — not a legal contract.</strong>
                 <span>
                   Created {new Date(receipt.completed_at).toLocaleString()}
                 </span>
               </div>
             </header>
-            <AgreementMap terms={receipt.terms} />
+            {participantLanguages.hirer !== participantLanguages.worker ? (
+              <div className="receipt-language-views">
+                <section lang="en">
+                  <p className="eyebrow">English</p>
+                  <AgreementMap terms={receipt.terms} language="en" />
+                </section>
+                <section lang="hi">
+                  <p className="eyebrow">हिंदी</p>
+                  <AgreementMap terms={receipt.terms} language="hi" />
+                </section>
+              </div>
+            ) : (
+              <AgreementMap terms={receipt.terms} language={participantLanguages.hirer} />
+            )}
             <div className="receipt-meta"><div><span>Session currency</span><strong>{receipt.currency}</strong></div></div>
             <div className="confirmed-by">
               <span>Confirmed separately by</span>
@@ -427,7 +468,20 @@ export function DemoExperience({
                 </strong>
               ))}
             </div>
-            <footer>{receipt.disclaimer}</footer>
+            <div className="receipt-hash">
+              <span>Integrity hash</span>
+              <code>{receipt.integrity_hash}</code>
+            </div>
+            <footer>
+              <p>{receipt.disclaimer}</p>
+              {participantLanguages.hirer !== participantLanguages.worker ? (
+                <p lang="hi">{receipt.disclaimer_hi}</p>
+              ) : null}
+              <p>{receipt.identity_disclaimer}</p>
+              {participantLanguages.hirer !== participantLanguages.worker ? (
+                <p lang="hi">{receipt.identity_disclaimer_hi}</p>
+              ) : null}
+            </footer>
           </article>
           <Link className="button secondary full" href="/demo/setup">
             Start over

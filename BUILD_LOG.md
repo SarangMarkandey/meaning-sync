@@ -144,6 +144,14 @@ Verification:
 - `npm run build`: passed; `/`, `/demo`, `/demo/setup`, `/live`, and `/live/setup` generated.
 - `git diff --check`: passed.
 
+## Judge Quick-Start Documentation
+
+**Date:** 2026-07-21
+
+- Made `scripts/run-demo.sh` the primary no-key judge path in the README and judge guide.
+- Documented the recommended deterministic Hindi–English evaluation, its privacy/confirmation checks, and all unnecessary credentials and infrastructure.
+- Identified `v1.0.0-build-week` as the submission version while noting that the tag must be published before judges can check it out.
+
 No OpenAI request—paid or otherwise—ran during this repair. The implementation is ready for exactly one separately authorized paid verification.
 
 ## Milestone 4 — Clarification, Confirmation, and Clarity Receipt
@@ -339,3 +347,46 @@ Final verification results:
 - Preserved the OpenAI Realtime SDP answer without trimming its required final line terminator before `RTCPeerConnection.setRemoteDescription()`.
 - Added mocked provider and FastAPI endpoint regression assertions that require the returned SDP to retain its trailing CRLF.
 - Focused Ruff checks passed; focused backend tests passed with 16 tests and one paid integration test skipped. No OpenAI request ran.
+
+## Submission-Ready English/Hindi Experience
+
+**Date:** 2026-07-20
+
+- Added optional Unicode participant display names that are trimmed, role-scoped, self-provided during creator/join/private-handoff flows, persisted without an account model, and explicitly excluded from identity claims.
+- Completed the responsive homepage with the product explanation, accurate capability line, agreement preview, three-step explanation, audience/bilingual value, trust boundaries, and direct Demo/Live routes.
+- Enabled all English/Hindi Live language combinations and added one typed static UI dictionary with safe English fallback. Finalized mixed-language text is persisted before backend-only GPT-5.6 Structured Output translation; same-language sessions do not translate, polling never translates, and a failed translation preserves/reveals the original and supports retry.
+- Kept original typed/audio evidence immutable, including reviewed machine-transcript provenance. Realtime transcription receives the active participant's `en` or `hi` language and is never asked to translate audio.
+- Added language-independent semantic terms/options with session-required localizations. Live structured analysis must supply dynamic Hindi summaries and matching participant-position IDs; missing unsafe localization is rejected rather than replaced with Demo wording. Equivalent English/Hindi choices share one option ID, and derived versions update both language views.
+- Added language-bound separate confirmations and bilingual receipt rendering with names, original evidence, unresolved/missing terms, English/Hindi legal and identity disclaimers, localization provenance, and an integrity hash.
+- Preserved the English deterministic Demo and added the exact Hindi-Homeowner/English-Electrician fixture, deterministic message/term/choice translations, hidden first response, separate confirmations, and a bilingual hashed receipt without an API key or microphone.
+- Advanced durable state to `state-v5` with v1–v4 migration defaults for names, translations, and localizations. Made Alembic paths config-relative so migrations and tests work outside `api/` without loading its local environment file.
+- Added the judge quick start, isolated verification/launcher scripts, judge guide, Devpost description, under-three-minute video script, submission checklist, Codex collaboration notes, and updated all affected architecture, API, data, language, privacy, product, evaluation, demo, and roadmap documentation.
+
+Final verification results:
+
+- Branch safety passed before editing: `feat/hindi-english-bilingual` contained the fetched `origin/main` commit.
+- `ruff format --check api/app api/tests` and `ruff check api/app api/tests`: passed across 53 files.
+- Complete backend collection: 113 passed; 13 explicitly opt-in paid OpenAI analysis/transcription tests skipped. Legacy-state upgrades, fresh SQL persistence, restart recovery, authorization, audio provenance, message translation, dynamic localization, hidden answers, confirmation, and receipts are covered.
+- Fresh temporary SQLite migration passed through `20260717_02`; FastAPI OpenAPI 3.1 generation passed with 36 paths and 37 operations.
+- ESLint and TypeScript passed. Vitest passed 48 tests across 15 files. Next.js 16.2.10 production build passed and generated all 9 application routes.
+- `scripts/verify-submission.sh` passed: temporary SQLite migration, backend import, 25 deterministic backend tests, TypeScript, and 9 focused frontend tests. Both scripts pass Bash syntax validation and do not read `api/.env`.
+- Headless Chrome clicked through the key-free bilingual flow: separate consent, original/translated evidence, agreement map, hidden Hindi first choice, compatible English second choice, localized confirmations, bilingual receipt, and English Demo. Representative states were inspected at 1440×900, 1024×768, and 390×844 with no horizontal overflow, clipped controls, hydration failure, or page console error. Translation-failure/retry rendering was verified with a deterministic frontend mock test rather than a browser-only debug route.
+- `git diff --check`, tracked artifact checks, and secret-pattern checks passed. No `.env`, database, audio, virtual environment, dependency directory, or build output is tracked.
+- No paid OpenAI request ran. `api/.env` was not read, printed, or modified. No commit, push, merge, stash, deployment, or destructive Git action was performed.
+
+## Live Comparison Timeout Recovery
+
+**Date:** 2026-07-21
+
+- Diagnosed the HTTP 504 after **Compare our understanding** as the 30-second OpenAI client timeout; the continuing successful GETs were normal two-device session polling, not a comparison still running.
+- Added a dedicated 90-second agreement-analysis timeout while retaining the shorter shared timeout for translation and teach-back requests.
+- Kept automatic provider retries disabled and preserved the retryable timeout message across successful background polls. The durable workflow still restores Conversation after failure so the creator can explicitly retry without losing messages.
+- Added focused backend timeout-selection and frontend polling/error-recovery regression coverage. No paid OpenAI request was made and `api/.env` was not read or changed.
+
+Verification:
+
+- Focused Ruff format/check and 24 analyzer tests: passed.
+- Durable failed-analysis recovery test: passed.
+- ESLint, TypeScript, and all 8 Live session experience tests: passed.
+- Next.js 16.2.10 production build: passed with all 9 application routes.
+- `git diff --check`: passed.

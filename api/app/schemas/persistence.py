@@ -40,7 +40,7 @@ class PersistedQuestionRecord(StrictModel):
 
 
 class PersistedLiveSessionState(StrictModel):
-    state_schema_version: Literal[1, 2, 3, 4] = 4
+    state_schema_version: Literal[1, 2, 3, 4, 5] = 5
     id: str = Field(min_length=1, max_length=120)
     created_at: datetime
     participants: list[AnalysisParticipant] = Field(min_length=2, max_length=2)

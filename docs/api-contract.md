@@ -10,7 +10,7 @@ All implemented endpoints are JSON under `/api/v1`. `GET /health` returns servic
 
 ## Standalone Agreement Analysis
 
-`POST /api/v1/agreements/analyze` accepts Live Mode, exactly one hirer and one worker, and 2–40 ordered English messages:
+`POST /api/v1/agreements/analyze` accepts Live Mode, exactly one hirer and one worker, and 2–40 ordered English or Hindi messages whose language matches the speaker:
 
 ```json
 {
@@ -27,7 +27,7 @@ All implemented endpoints are JSON under `/api/v1`. `GET /health` returns servic
 }
 ```
 
-The response includes `prompt_version`, configured `model`, `status` (`complete` or `partial`), `warnings`, agreement terms, and zero or one `primary_clarification`. Each term has canonical `analysis_item_key`, `topic`, and `facet` fields; neutral `summary`; underlying `state` (`aligned`, `conflicting`, `stated_by_one`, or `not_discussed`); participant positions/statuses; evidence message IDs; backend-hydrated original evidence; and an optional exact item-key clarification target. The backend derives a clarification's target item key, topic, facet, and evidence IDs from its owning term.
+The response includes `prompt_version`, configured `model`, `status` (`complete` or `partial`), `warnings`, agreement terms, and zero or one `primary_clarification`. Each term has canonical `analysis_item_key`, `topic`, and `facet` fields; neutral `summary`; underlying `state` (`aligned`, `conflicting`, `stated_by_one`, or `not_discussed`); participant positions/statuses; only the session-required English/Hindi localizations; evidence message IDs; backend-hydrated original evidence; and an optional exact item-key clarification target. The backend derives a clarification's target item key, topic, facet, and evidence IDs from its owning term.
 
 Atomic keys prevent adjacent meanings from being merged. For example, agreement on `price.amount` remains aligned when the parties conflict on `materials.inclusion`.
 
@@ -55,7 +55,7 @@ Live Conversation accepts typed messages and reviewed audio transcripts in the s
 
 ## Deterministic Demo Sessions
 
-`POST /api/v1/demo/sessions` accepts optional independent languages, currently `en`/`en`. Follow-up routes use the returned session ID:
+`POST /api/v1/demo/sessions` accepts the prepared `en`/`en` or `hi`/`en` language preset. Follow-up routes use the returned session ID:
 
 - `GET /{session_id}`
 - `POST /{session_id}/consent`
@@ -69,4 +69,4 @@ All paths above are relative to `/api/v1/demo/sessions`. First clarification ans
 
 ## Status
 
-Implemented: standalone analysis, server-owned durable Live workflow, deterministic Demo routes, restart-recoverable Live receipts, expiry, optimistic concurrency, shared/separate devices, and consent-gated Live WebRTC transcription with reviewed evidence provenance. `hi` exists in shared language models but Live requests reject it. Credentials authorize possession, not identity. Translation remains later work. MeaningSync does not provide legal advice, and its clarity receipt is not a legal contract.
+Implemented: standalone bilingual analysis, server-owned durable Live workflow, English and Hindi/English deterministic Demo routes, restart-recoverable bilingual receipts, expiry, optimistic concurrency, shared/separate devices, and consent-gated Live WebRTC transcription with reviewed evidence provenance. `en` and `hi` are accepted in all four Live combinations. Optional role-scoped names are self-provided. Credentials authorize possession, not identity. Derived translations are persisted separately from original evidence. MeaningSync does not provide legal advice, and its clarity receipt is not a legal contract.

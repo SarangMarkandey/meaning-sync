@@ -89,10 +89,19 @@ class ClarityReceipt(BaseModel):
     session_id: str
     title: str = "MeaningSync Clarity Receipt"
     disclaimer: str = "MeaningSync Clarity Receipt — not a legal contract."
+    disclaimer_hi: str = "MeaningSync स्पष्टता रसीद — यह कानूनी अनुबंध नहीं है।"
+    identity_disclaimer: str = (
+        "Participant names are self-provided display names. MeaningSync does not "
+        "verify identity."
+    )
+    identity_disclaimer_hi: str = (
+        "प्रतिभागियों के नाम स्वयं दिए गए प्रदर्शन नाम हैं। MeaningSync पहचान सत्यापित नहीं करता।"
+    )
     terms: list[AgreementTerm]
     confirmations: list[PartyConfirmation]
     completed_at: datetime
     currency: CurrencyCode = CurrencyCode.INR
+    integrity_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class ConsentSubmission(BaseModel):

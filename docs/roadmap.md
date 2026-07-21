@@ -13,7 +13,7 @@
 - Matches / Needs a decision / Not discussed agreement map with evidence on every non-missing term
 - Hidden private choices, compatible deterministic resolution, disagreement non-repetition, and optional missing topics without mandatory teach-back
 - Immutable meaningful versions, Conversation re-entry, separate confirmations, and invalidation after changes
-- Durable state-v4 SQL sessions/receipts, migration from v1/v2/v3, restart recovery, persistent consent/idempotency, optimistic revisions, and TTL expiry
+- Durable state-v5 SQL sessions/receipts, migration from v1/v2/v3/v4, restart recovery, persistent translation/consent/idempotency, optimistic revisions, and TTL expiry
 - Receipts preserving roles, languages, currency/evidence provenance, timestamps, history, unresolved/missing items, disclaimer, and integrity hash
 
 ## Partially Implemented

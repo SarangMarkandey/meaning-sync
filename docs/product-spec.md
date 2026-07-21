@@ -12,7 +12,7 @@ Demo and Live show exactly six steps:
 
 | Step | User action | Product rule |
 | --- | --- | --- |
-| Preferences | Choose each person’s language and session currency. | English is implemented. Live supports INR/USD/EUR; Demo is fixed to English/INR. Currency metadata never converts original evidence. |
+| Preferences | Choose each person’s English/Hindi language and session currency. | Live supports all four language combinations and INR/USD/EUR; Demo offers English and Hindi/English INR presets. Currency metadata never converts original evidence. |
 | Participation | Choose Customer or Service provider and shared or separate devices. | Either role may create. A separate-device invite always belongs to the opposite role. |
 | Conversation | Choose Type or Speak per turn, review every transcript, and independently mark ready. | Both people must contribute and be ready before comparison. New text or finalized transcript clears readiness and confirmations. Messages never trigger analysis. |
 | Check understanding | Review Matches, Needs a decision, and Not discussed. | Non-missing items show original evidence. Only conflicts/one-sided items need private choices. The first choice stays hidden. Missing topics are optional. |
@@ -39,4 +39,4 @@ Two separate current-version confirmations are required. The receipt records rol
 
 **Implemented:** deterministic English/INR Demo; conversation-first shared/separate Live; consent-gated reviewed WebRTC transcripts with typed fallback; creator-selectable generic roles; INR/USD/EUR metadata; readiness-gated analysis; private choices; immutable versions; separate confirmation; durable sessions/receipts; restart recovery; expiry; optimistic concurrency; and persistent idempotency.
 
-**Planned:** moderated usability validation, Hindi and translation, automated cleanup/backups/deletion, and privacy-preserving observability. MeaningSync records stated meaning; it does not provide legal advice or create an enforceable agreement.
+**Planned:** moderated usability validation, automated cleanup/backups/deletion, and privacy-preserving observability. MeaningSync records stated meaning; it does not provide legal advice, verify self-provided names, promise perfect translation, or create an enforceable agreement.

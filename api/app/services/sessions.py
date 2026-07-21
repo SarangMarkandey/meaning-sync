@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from threading import RLock
@@ -13,6 +15,8 @@ from app.schemas.analysis import (
     AnalysisMessage,
     AnalysisParticipant,
     EvidenceReference,
+    LanguageCode,
+    LocalizedParticipantPosition,
     MeaningState,
 )
 from app.schemas.session import (
@@ -88,6 +92,17 @@ class SessionService:
         currency: CurrencyCode = CurrencyCode.INR,
     ) -> SessionView:
         languages = participant_languages or ParticipantLanguages()
+        if self._translation_service is None and (
+            languages.hirer,
+            languages.worker,
+        ) not in {
+            ("en", "en"),
+            ("hi", "en"),
+        }:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "The Demo supports English or the prepared Hindi/English preset.",
+            )
         session_id = str(uuid4())
         participants = [
             SessionParticipant(
@@ -105,7 +120,7 @@ class SessionService:
                 requested_display_language=languages.worker,
             ),
         ]
-        transcript = demo_transcript(session_id)
+        transcript = demo_transcript(session_id, languages)
         for target_language in {
             participant.requested_display_language for participant in participants
         }:
@@ -245,12 +260,24 @@ class SessionService:
                 return record.receipt
             self._require_stage(record, SessionStage.CONFIRMATION)
             self._transition(record, SessionStage.COMPLETED)
-            record.receipt = ClarityReceipt(
+            receipt_without_hash = ClarityReceipt(
                 session_id=record.id,
                 terms=record.terms,
                 confirmations=list(record.confirmations.values()),
                 completed_at=datetime.now(UTC),
                 currency=record.currency,
+                integrity_hash="0" * 64,
+            )
+            canonical = json.dumps(
+                receipt_without_hash.model_dump(
+                    mode="json", exclude={"integrity_hash"}
+                ),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+            record.receipt = receipt_without_hash.model_copy(
+                update={"integrity_hash": hashlib.sha256(canonical).hexdigest()}
             )
             return record.receipt
 
@@ -284,6 +311,58 @@ class SessionService:
             )
             for answer in answers
         ]
+        if compatible:
+            english_summary = (
+                "Parts are included"
+                if answers[0].meaning == MaterialsPolicy.INCLUDED
+                else "Parts are charged separately"
+            )
+            hindi_summary = (
+                "पुर्जे शामिल हैं"
+                if answers[0].meaning == MaterialsPolicy.INCLUDED
+                else "पुर्जों का खर्च अलग है"
+            )
+        else:
+            english_summary = "The participants gave different clarification answers"
+            hindi_summary = "प्रतिभागियों ने अलग-अलग स्पष्टीकरण उत्तर दिए"
+        localized_summaries = {
+            LanguageCode.ENGLISH: english_summary,
+            LanguageCode.HINDI: hindi_summary,
+        }
+        localizations = {
+            language: localization.model_copy(
+                update={
+                    "summary": localized_summaries[language],
+                    "participant_positions": [
+                        LocalizedParticipantPosition(
+                            participant_id=answer.party.value,
+                            summary=(
+                                localized_summaries[language]
+                                if compatible
+                                else (
+                                    "पुर्जे शामिल हैं"
+                                    if language == LanguageCode.HINDI
+                                    and answer.meaning == MaterialsPolicy.INCLUDED
+                                    else (
+                                        "पुर्जों का खर्च अलग है"
+                                        if language == LanguageCode.HINDI
+                                        else (
+                                            "Parts are included"
+                                            if answer.meaning
+                                            == MaterialsPolicy.INCLUDED
+                                            else "Parts are charged separately"
+                                        )
+                                    )
+                                )
+                            ),
+                        )
+                        for answer in answers
+                    ],
+                    "provenance": "participant-choice-v1",
+                }
+            )
+            for language, localization in current.localizations.items()
+        }
         record.terms[index] = AgreementTerm(
             id=current.id,
             analysis_item_key=current.analysis_item_key,
@@ -291,15 +370,7 @@ class SessionService:
             facet=current.facet,
             label=current.label,
             state=MeaningState.ALIGNED if compatible else MeaningState.CONFLICTING,
-            summary=(
-                (
-                    "Parts are included"
-                    if answers[0].meaning == MaterialsPolicy.INCLUDED
-                    else "Parts are charged separately"
-                )
-                if compatible
-                else "The parties gave different clarification answers"
-            ),
+            summary=english_summary,
             participant_positions=current.participant_positions,
             evidence_message_ids=current.evidence_message_ids,
             evidence=[*current.evidence, *clarification_evidence],
@@ -308,6 +379,7 @@ class SessionService:
                 for role in PartyRole
             },
             clarification_target=(None if compatible else current.analysis_item_key),
+            localizations=localizations,
         )
         return record.terms[index]
 
@@ -326,7 +398,10 @@ class SessionService:
             "parts are charged separately",
             "replacement parts are charged separately",
             "replacement parts are separate",
+            "पुर्जों का खर्च अलग है",
+            "बदलने वाले पुर्जों का खर्च अलग है",
         }
+        included_answers.update({"पुर्जे शामिल हैं", "बदलने वाले पुर्जे शामिल हैं"})
         if normalized in included_answers:
             return MaterialsPolicy.INCLUDED
         if normalized in separate_answers:

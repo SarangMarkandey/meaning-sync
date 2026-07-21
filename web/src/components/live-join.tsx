@@ -18,6 +18,7 @@ export function LiveJoin() {
   const [state, setState] = useState<JoinState>("checking");
   const [role, setRole] = useState<PartyRole>("worker");
   const [message, setMessage] = useState("Checking your private invitation…");
+  const [displayName, setDisplayName] = useState("");
 
   useScrollToTop(`live-join:${state}`);
 
@@ -54,7 +55,7 @@ export function LiveJoin() {
     setState("joining");
     setMessage("Connecting you to this MeaningSync session…");
     try {
-      const result = await api.exchangeLiveInvitation(invitation);
+      const result = await api.exchangeLiveInvitation(invitation, displayName);
       storeLiveAccess(result.session_id, [
         {
           role: result.role,
@@ -97,9 +98,22 @@ export function LiveJoin() {
             </span>
           </div>
           {state === "consent" ? (
-            <button className="button primary" type="button" onClick={() => void join()}>
-              Join as {roleLabel(role)} <span>→</span>
-            </button>
+            <>
+              <label className="setup-name" htmlFor="join-display-name">
+                What should MeaningSync call you?
+                <input
+                  id="join-display-name"
+                  maxLength={80}
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder={roleLabel(role)}
+                />
+                <small>Optional — leave blank to use {roleLabel(role)}.</small>
+              </label>
+              <button className="button primary" type="button" onClick={() => void join()}>
+                Join as {roleLabel(role)} <span>→</span>
+              </button>
+            </>
           ) : state === "joining" || state === "checking" ? (
             <p role="status">Please wait…</p>
           ) : (

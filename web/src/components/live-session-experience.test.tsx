@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LiveSessionExperience } from "@/components/live-session-experience";
-import { api, type LiveSessionView } from "@/lib/api";
+import { api, MeaningSyncApiError, type LiveSessionView } from "@/lib/api";
 import { guidedV5Session } from "@/test/fixtures/live-guided";
 
 const push = vi.fn();
@@ -136,6 +136,42 @@ describe("LiveSessionExperience conversation-first flow", () => {
     await waitFor(() => expect(readiness).toHaveBeenCalled());
   });
 
+  it("keeps a retryable comparison timeout visible after session polling", async () => {
+    const session = conversationSession();
+    session.participant_readiness = { hirer: true, worker: true };
+    vi.spyOn(api, "getLiveSession").mockResolvedValue(session);
+    vi.spyOn(api, "analyzeLiveSession").mockRejectedValue(
+      new MeaningSyncApiError(
+        "Live analysis took too long. Your conversation is saved; please try again.",
+        "timeout",
+        true,
+        504,
+      ),
+    );
+    render(<LiveSessionExperience sessionId="live-guided-v5" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Compare our understanding/,
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Live analysis took too long. Your conversation is saved; please try again.",
+      ),
+    ).toBeVisible();
+    await new Promise((resolve) => window.setTimeout(resolve, 1600));
+    expect(
+      screen.getByText(
+        "Live analysis took too long. Your conversation is saved; please try again.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /Compare our understanding/ }),
+    ).toBeEnabled();
+  });
+
   it("renders matches, decisions, and not-discussed sections with evidence", async () => {
     const session = guidedV5Session();
     vi.spyOn(api, "getLiveSession").mockResolvedValue(session);
@@ -150,7 +186,7 @@ describe("LiveSessionExperience conversation-first flow", () => {
   it("shows only the addressed participant a private bounded choice", async () => {
     vi.spyOn(api, "getLiveSession").mockResolvedValue(guidedV5Session());
     render(<LiveSessionExperience sessionId="live-guided-v5" />);
-    expect(await screen.findByText("Private choice · Customer")).toBeVisible();
+    expect(await screen.findByText("Private choice · Homeowner · Customer")).toBeVisible();
     expect(screen.getByText(/stays hidden/)).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Submit my choice" }),

@@ -15,7 +15,7 @@ Workflow coverage must assert:
 - hidden first private choice, compatible resolution, different-choice non-repetition, and optional missing topics;
 - no mandatory teach-back/minimum question count;
 - two current-version confirmations, Conversation re-entry, and invalidation after change;
-- durable state-v4 migration from v3, restart recovery, idempotency, optimistic conflicts, expiry, and stable receipt hash;
+- durable state-v5 migration from v4, restart recovery, translation idempotency, optimistic conflicts, expiry, and stable bilingual receipt hash;
 - role/version consent before microphone access; fake WebRTC initialization; transcript provenance, limits, cleanup, and text fallback;
 - receipt preservation of roles, languages, session/evidence currency, times, history, unresolved/missing items, and disclaimer.
 
@@ -35,4 +35,4 @@ Realtime initialization has a separate disabled gate: `RUN_OPENAI_TRANSCRIPTION_
 
 ## Planned
 
-Add opt-in PostgreSQL deployment coverage, Hindi/cross-language cases, privacy red-teaming, and moderated usability review. MeaningSync records stated meaning; it does not prove comprehension or provide legal advice.
+Add opt-in PostgreSQL deployment coverage, broader Hindi/cross-language evaluation, privacy red-teaming, and moderated usability review. MeaningSync records stated meaning; it does not prove comprehension, translation perfection, identity, or provide legal advice.

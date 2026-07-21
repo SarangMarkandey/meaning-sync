@@ -1,4 +1,4 @@
-import type { AgreementTerm, MeaningState } from "@/lib/api";
+import type { AgreementTerm, LanguageCode, MeaningState } from "@/lib/api";
 import { roleLabel } from "@/lib/flow-presentation";
 
 const languageNames = {
@@ -43,10 +43,12 @@ export function AgreementMap({
   terms,
   roleMode = "demo",
   onDiscussMissing,
+  language = "en",
 }: {
   terms: AgreementTerm[];
   roleMode?: "live" | "demo";
   onDiscussMissing?: (itemKey: string) => void;
+  language?: LanguageCode;
 }) {
   if (!terms.length) {
     return (
@@ -74,22 +76,24 @@ export function AgreementMap({
             </header>
             <div className="term-list">
               {matchingTerms.length ? (
-                matchingTerms.map((term) => (
+                matchingTerms.map((term) => {
+                  const localized = term.localizations?.[language];
+                  return (
                   <article className="term-card" key={term.id}>
                     <div className="term-title-row">
-                      <p className="term-label">{term.label}</p>
+                      <p className="term-label" lang={language}>{localized?.label ?? term.label}</p>
                       <span className={`meaning-state ${term.state}`}>
                         {stateLabels[term.state]}
                       </span>
                     </div>
-                    <p className="term-value">{term.summary}</p>
+                    <p className="term-value" lang={language}>{localized?.summary ?? term.summary}</p>
                     {term.participant_positions.length > 0 &&
                       term.state !== "aligned" && (
                         <div className="position-list">
                           {term.participant_positions.map((position) => (
                             <div key={position.participant_id}>
                               <span>{roleLabel(position.role, roleMode)}</span>
-                              <p>{position.summary}</p>
+                              <p lang={language}>{localized?.participant_positions.find((item) => item.participant_id === position.participant_id)?.summary ?? position.summary}</p>
                             </div>
                           ))}
                         </div>
@@ -131,7 +135,8 @@ export function AgreementMap({
                       </button>
                     ) : null}
                   </article>
-                ))
+                  );
+                })
               ) : (
                 <p className="section-empty">No terms in this section.</p>
               )}

@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({
 describe("LiveSetup", () => {
   beforeEach(() => push.mockReset());
 
-  it("shows independent English controls, currency, and disabled Hindi", () => {
+  it("shows independent English and Hindi controls with currency", () => {
     render(<LiveSetup />);
 
     const controls = screen.getAllByLabelText("Language");
@@ -22,7 +22,7 @@ describe("LiveSetup", () => {
     expect(controls[0]).toHaveValue("en");
     expect(controls[1]).toHaveValue("en");
     for (const option of screen.getAllByRole("option", { name: /Hindi/ })) {
-      expect(option).toBeDisabled();
+      expect(option).toBeEnabled();
     }
     expect(screen.getByRole("combobox", { name: /Session currency/ })).toHaveValue("INR");
     expect(screen.getByText(/No currency conversion/)).toBeVisible();
@@ -33,6 +33,7 @@ describe("LiveSetup", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Continue/ }));
     expect(screen.getByRole("heading", { name: "Who are you?" })).toBeVisible();
     expect(screen.getByLabelText("I am the Customer")).toBeChecked();
+    expect(screen.getByLabelText(/What should MeaningSync call you/)).toBeVisible();
     expect(push).not.toHaveBeenCalled();
   });
 

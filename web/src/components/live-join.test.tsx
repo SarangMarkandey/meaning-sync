@@ -37,10 +37,13 @@ describe("LiveJoin", () => {
     ).toBeVisible();
     expect(exchange).not.toHaveBeenCalled();
     expect(window.location.hash).toBe("");
+    fireEvent.change(screen.getByLabelText(/What should MeaningSync call you/), {
+      target: { value: "  Meera  " },
+    });
     fireEvent.click(screen.getByRole("button", { name: /Join as Service provider/ }));
 
     await screen.findByText("Connecting you to this MeaningSync session…");
-    expect(exchange).toHaveBeenCalledWith("one-time-private-invitation");
+    expect(exchange).toHaveBeenCalledWith("one-time-private-invitation", "  Meera  ");
     expect(replace).toHaveBeenCalledWith("/live/live-separate-1");
     expect(window.location.hash).toBe("");
     expect(document.body).not.toHaveTextContent("one-time-private-invitation");

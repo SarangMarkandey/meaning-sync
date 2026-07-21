@@ -19,7 +19,13 @@ export default async function DemoPage({
   const workerLanguage = params.worker_language ?? "en";
   const currency = params.currency ?? "INR";
 
-  if (hirerLanguage !== "en" || workerLanguage !== "en" || currency !== "INR") {
+  if (
+    !(
+      (hirerLanguage === "en" && workerLanguage === "en") ||
+      (hirerLanguage === "hi" && workerLanguage === "en")
+    ) ||
+    currency !== "INR"
+  ) {
     redirect("/demo/setup");
   }
 

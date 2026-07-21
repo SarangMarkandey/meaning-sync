@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 
@@ -28,8 +29,10 @@ from app.schemas.workflow import (
     LiveSessionView,
     NotApplicableProposalSubmission,
     OptionalDetailsReviewedSubmission,
+    ParticipantProfileSubmission,
     ParticipantReadinessSubmission,
     StartUnderstandingCheckSubmission,
+    TranslationRetrySubmission,
     WorkflowErrorCode,
     WorkflowErrorDetail,
     WorkflowErrorResponse,
@@ -178,10 +181,20 @@ def _provider_error(exc: AnalysisFailure) -> HTTPException:
     responses=ERROR_RESPONSES,
 )
 async def exchange_live_invitation(
-    submission: LiveInvitationExchange, request: Request
+    submission: LiveInvitationExchange, request: Request, service: Service
 ) -> LiveInvitationExchangeResult:
     try:
-        return get_live_access_service(request).exchange(submission.invitation)
+        result = get_live_access_service(request).exchange(submission.invitation)
+        if submission.display_name is not None:
+            service.update_participant_profile(
+                result.session_id,
+                result.role,
+                ParticipantProfileSubmission(
+                    display_name=submission.display_name,
+                    request_id=f"join-profile-{uuid4().hex}",
+                ),
+            )
+        return result
     except AccessFailure as exc:
         raise _access_error(exc) from exc
 
@@ -253,6 +266,7 @@ async def add_draft_statement(
     try:
         context = _authorize(request, authorization, session_id)
         service.add_draft_statement(session_id, context.role, submission)
+        await service.translate_latest_message(session_id, context.role)
         return _scoped_view(request, service, session_id, context)
     except WorkflowFailure as exc:
         raise _workflow_error(exc) from exc
@@ -370,9 +384,52 @@ async def add_audio_transcript(
     try:
         context = _authorize(request, authorization, session_id)
         service.add_audio_transcript(session_id, context.role, submission)
+        await service.translate_latest_message(session_id, context.role)
         await get_realtime_transcription_service(request).release(
             session_id=session_id, role=context.role.value
         )
+        return _scoped_view(request, service, session_id, context)
+    except WorkflowFailure as exc:
+        raise _workflow_error(exc) from exc
+
+
+@router.post(
+    "/{session_id}/participant-profile",
+    response_model=LiveSessionView,
+    responses=ERROR_RESPONSES,
+)
+async def update_participant_profile(
+    session_id: str,
+    submission: ParticipantProfileSubmission,
+    service: Service,
+    request: Request,
+    authorization: Authorization = None,
+) -> LiveSessionView:
+    try:
+        context = _authorize(request, authorization, session_id)
+        service.update_participant_profile(session_id, context.role, submission)
+        return _scoped_view(request, service, session_id, context)
+    except WorkflowFailure as exc:
+        raise _workflow_error(exc) from exc
+
+
+@router.post(
+    "/{session_id}/messages/{message_id}/translation/retry",
+    response_model=LiveSessionView,
+    responses=ERROR_RESPONSES,
+)
+async def retry_message_translation(
+    session_id: str,
+    message_id: str,
+    submission: TranslationRetrySubmission,
+    service: Service,
+    request: Request,
+    authorization: Authorization = None,
+) -> LiveSessionView:
+    del submission
+    try:
+        context = _authorize(request, authorization, session_id)
+        await service.translate_message(session_id, message_id)
         return _scoped_view(request, service, session_id, context)
     except WorkflowFailure as exc:
         raise _workflow_error(exc) from exc

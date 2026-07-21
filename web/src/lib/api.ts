@@ -46,6 +46,7 @@ export type AnalysisErrorCode =
   | "invalid_model_output"
   | "provider_error";
 export type AnalysisStatus = "complete" | "partial";
+export type TranslationStatus = "not_required" | "pending" | "ready" | "failed";
 export type AnalysisWarningCode = "clarification_unavailable";
 export type LiveSessionStage =
   | "conversation_draft"
@@ -186,6 +187,14 @@ export interface ParticipantPosition {
   evidence_message_ids: string[];
 }
 
+export interface AgreementTermLocalization {
+  language: LanguageCode;
+  label: string;
+  summary: string;
+  participant_positions: Array<{ participant_id: string; summary: string }>;
+  provenance: string;
+}
+
 export interface AgreementTerm {
   id: string;
   analysis_item_key: string;
@@ -199,6 +208,7 @@ export interface AgreementTerm {
   evidence_message_ids: string[];
   evidence: EvidenceReference[];
   clarification_target: string | null;
+  localizations?: Partial<Record<LanguageCode, AgreementTermLocalization>>;
 }
 
 export interface ClarificationQuestion {
@@ -261,16 +271,33 @@ export interface ClarityReceipt {
   session_id: string;
   title: string;
   disclaimer: string;
+  disclaimer_hi: string;
+  identity_disclaimer: string;
+  identity_disclaimer_hi: string;
   terms: AgreementTerm[];
   confirmations: PartyConfirmation[];
   completed_at: string;
   currency: CurrencyCode;
+  integrity_hash: string;
 }
 
 export interface AnalysisParticipant {
   id: string;
   role: PartyRole;
   language: LanguageCode;
+  display_name?: string | null;
+}
+
+export interface MessageTranslation {
+  source_language: LanguageCode;
+  target_language: LanguageCode;
+  status: TranslationStatus;
+  translated_text?: string | null;
+  semantic_equivalence_status?: "equivalent" | "review_required" | null;
+  warnings: string[];
+  model: string;
+  prompt_version: string;
+  fingerprint: string;
 }
 
 export interface AnalysisMessage {
@@ -290,6 +317,7 @@ export interface AnalysisMessage {
   audio_started_at?: string | null;
   audio_completed_at?: string | null;
   audio_duration_seconds?: number | null;
+  translations?: Partial<Record<LanguageCode, MessageTranslation>>;
 }
 
 export interface AudioConsent {
@@ -360,6 +388,7 @@ export interface UnderstandingOption {
   id: string;
   label: string;
   kind: UnderstandingOptionKind;
+  localizations?: Partial<Record<LanguageCode, string>>;
 }
 
 export interface UnderstandingOutcomePosition {
@@ -391,6 +420,7 @@ export interface UnderstandingQuestion {
   question_number: number;
   question_count: number;
   outcome?: UnderstandingQuestionOutcome | null;
+  prompt_localizations?: Partial<Record<LanguageCode, string>>;
 }
 
 export interface LiveConfirmation {
@@ -401,6 +431,7 @@ export interface LiveConfirmation {
   unresolved_item_acknowledgments: string[];
   confirmed_at: string;
   language: LanguageCode;
+  display_name?: string | null;
   request_id: string;
   invalidated_at: string | null;
 }
@@ -522,6 +553,7 @@ export interface ReceiptConfirmation {
   confirmation_id: string;
   confirmed_at: string;
   language: LanguageCode;
+  display_name?: string | null;
 }
 
 export interface ReceiptClarificationSummary {
@@ -573,6 +605,9 @@ export interface LiveClarityReceipt {
   schema_version: string;
   integrity_hash: string;
   disclaimer: string;
+  disclaimer_hi?: string;
+  identity_disclaimer?: string;
+  identity_disclaimer_hi?: string;
 }
 
 export class MeaningSyncApiError extends Error {
@@ -968,12 +1003,44 @@ export const api = {
         }),
       },
     ),
-  exchangeLiveInvitation: (invitation: string) =>
+  exchangeLiveInvitation: (invitation: string, displayName?: string) =>
     request<{ session_id: string; role: PartyRole; access_token: string; expires_at: string }>(
       "/api/v1/live/invitations/exchange",
       {
         method: "POST",
-        body: JSON.stringify({ invitation, privacy_notice_accepted: true }),
+        body: JSON.stringify({
+          invitation,
+          privacy_notice_accepted: true,
+          display_name: displayName?.trim() || null,
+        }),
+      },
+    ),
+  updateParticipantProfile: (
+    sessionId: string,
+    displayName: string,
+    requestId: string,
+    accessToken: string,
+  ) =>
+    request<LiveSessionView>(`${liveSessionPath(sessionId)}/participant-profile`, {
+      method: "POST",
+      headers: authorized(accessToken),
+      body: JSON.stringify({
+        display_name: displayName.trim() || null,
+        request_id: requestId,
+      }),
+    }),
+  retryMessageTranslation: (
+    sessionId: string,
+    messageId: string,
+    requestId: string,
+    accessToken: string,
+  ) =>
+    request<LiveSessionView>(
+      `${liveSessionPath(sessionId)}/messages/${encodeURIComponent(messageId)}/translation/retry`,
+      {
+        method: "POST",
+        headers: authorized(accessToken),
+        body: JSON.stringify({ request_id: requestId }),
       },
     ),
   regenerateLiveInvitation: (sessionId: string, accessToken: string) =>
