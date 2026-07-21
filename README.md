@@ -2,116 +2,275 @@
 
 > Make sure both sides mean the same thing.
 
-MeaningSync compares what two people understood from a spoken or typed service conversation, shows what matches, differs, or remains open, and creates a clarity receipt confirmed separately by both people. It is not a legal contract, signature, payment, or identity-verification product.
+MeaningSync helps a customer and a service provider compare what each person understood from a spoken or typed conversation. It shows what matches, what needs a decision, and what was never discussed, then creates a clarity receipt that both people confirm separately.
 
-## Judge quick start — no API key required
+It is designed for everyday service work such as repairs, freelance projects, home services, and other informal agreements. A MeaningSync receipt is not a legal contract, signature, payment record, or proof of identity.
 
-MeaningSync is provided as a judge-ready local test build. No login, test credentials, or OpenAI API key is required for the deterministic demos. Use the `v1.0.0-build-week` submission tag for the frozen judging build, or `main` for the submitted branch.
+## What it does
 
-Prerequisites: Python 3.12+, [uv 0.6+](https://docs.astral.sh/uv/getting-started/installation/), Node.js 20+, and npm.
+- Preserves each participant's original English or Hindi words as evidence
+- Supports typed messages and reviewed audio transcripts
+- Compares matching terms, differences, one-sided statements, and missing topics
+- Keeps the first participant's private choice hidden until both people answer
+- Supports shared-device and separate-device sessions
+- Creates role-bound, expiring, single-use invitation links and QR codes
+- Requires each participant to confirm the same agreement version separately
+- Produces a bilingual clarity receipt with unresolved items and an integrity hash
+- Includes deterministic English and English/Hindi demos that use no API credits
 
-From the repository root, install dependencies once:
+## Product flow
+
+`Preferences → Participation → Conversation → Check understanding → Confirm → Receipt`
+
+MeaningSync never treats silence as agreement. Original statements remain unchanged, translations are shown only as derived views, and unresolved points stay visible on the final receipt.
+
+## Tech stack
+
+- **Frontend:** Next.js 16, React 19, TypeScript, Tailwind CSS, and Vitest
+- **Backend:** FastAPI, Pydantic, SQLAlchemy, Alembic, and Pytest
+- **Database:** SQLite by default; PostgreSQL is also supported
+- **AI:** OpenAI Responses API Structured Outputs with GPT-5.6
+- **Audio:** OpenAI Realtime transcription over WebRTC
+
+## Requirements
+
+Install these before starting:
+
+- Git
+- Python 3.12 or newer
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.6 or newer
+- Node.js 20 or newer
+- npm
+
+Docker and PostgreSQL are not required for local development.
+
+## Quick start: Demo Mode
+
+Demo Mode is the fastest way to run the complete product flow. It uses prepared data and does not require an OpenAI API key, microphone, account, Docker, or PostgreSQL.
+
+```bash
+git clone https://github.com/SarangMarkandey/meaning-sync.git
+cd meaning-sync
+
+cd api
+uv sync --locked --extra dev
+
+cd ../web
+npm ci
+
+cd ..
+./scripts/run-demo.sh
+```
+
+Open the URL printed by the script, normally:
+
+```text
+http://localhost:3000/demo/setup
+```
+
+Choose **English Demo** or **English / Hindi Demo** and follow the six guided steps. Press `Ctrl+C` when finished. The script stops both servers and removes the temporary Demo database.
+
+## Full local installation
+
+Use this setup when you want to run Demo Mode and Live Mode from the same local project.
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/SarangMarkandey/meaning-sync.git
+cd meaning-sync
+```
+
+If the repository is private, GitHub will ask you to authenticate with an account that has access.
+
+### 2. Install the backend
 
 ```bash
 cd api
 uv sync --locked --extra dev
+cp .env.example .env
+```
+
+Open `api/.env` and add your OpenAI project key:
+
+```dotenv
+OPENAI_API_KEY=your_openai_project_key
+OPENAI_MODEL=gpt-5.6
+OPENAI_TRANSLATION_MODEL=gpt-5.6
+OPENAI_STORE_RESPONSES=false
+```
+
+The key is required for Live agreement analysis, mixed-language translation, and audio transcription. Keep `OPENAI_STORE_RESPONSES=false` and never commit `api/.env`.
+
+The default local configuration uses:
+
+```dotenv
+MEANINGSYNC_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+MEANINGSYNC_DATABASE_URL=sqlite:///./meaningsync-local.db
+```
+
+Most local users do not need to change the other backend settings in `.env.example`.
+
+### 3. Install the frontend
+
+```bash
 cd ../web
 npm ci
-cd ..
+cp .env.example .env.local
 ```
 
-Start the isolated Demo build:
+The default `web/.env.local` values are:
 
-```bash
-./scripts/run-demo.sh
+```dotenv
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_MEANINGSYNC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_LIVE_POLL_INTERVAL_MS=1500
 ```
 
-Open the local URL printed by the script and select **English / Hindi Demo** for the recommended judge path. Press `Ctrl+C` when finished; the script stops both servers and removes its temporary SQLite database.
+Do not put `OPENAI_API_KEY` or any other secret in `web/.env.local`. Variables prefixed with `NEXT_PUBLIC_` are available to browser code.
 
-The available deterministic paths are:
-
-- **English Demo** for the prepared English conversation.
-- **English / Hindi Demo** for a Hindi-speaking Homeowner and English-speaking Electrician.
-
-Both demos require no PostgreSQL, Docker, microphone, account, or paid API request. They preserve original evidence, show deterministic translations, surface the replacement-parts conflict, hide the first private choice, require two separate confirmations, and retain open items in a bilingual clarity receipt.
-
-See the complete [Judge Test Guide](docs/judge-test-guide.md).
-
-## Live Mode
-
-Live Mode supports:
-
-- English/English, Hindi/Hindi, and either mixed-language direction
-- Typed messages or reviewed audio transcripts
-- INR, USD, or EUR metadata
-- One shared device or separate devices joined through a single-use QR code or link
-
-Optional display names are self-provided and role-scoped. They do not verify anyone’s identity.
-
-The long-lived OpenAI project key is configured only in `api/.env` and is never exposed to browser code. Responses API analysis and translation run through FastAPI. Live audio uses a backend-issued, short-lived Realtime credential for the browser WebRTC session.
-
-Add a personal project key to `api/.env` to use Live agreement analysis, mixed-language translation, or Realtime transcription. GPT-5.6 performs the agreement reasoning through Responses API Structured Outputs. The backend sets `store=false`. Microphone access requires HTTPS or the browser’s `http://localhost` exception. MeaningSync stores finalized, reviewed transcripts and correction provenance—never raw audio.
-
-Live data defaults to the ignored local SQLite database at `api/meaningsync-local.db`. Before starting Live Mode, apply the database migrations:
+### 4. Initialize the database
 
 ```bash
-cd api
+cd ../api
 uv run alembic upgrade head
 ```
 
-Sessions, role-bound credential hashes, single-use invitation hashes, translations, immutable agreement versions, private choices, confirmations, and receipts survive backend restarts until expiry. Synchronization currently uses bounded polling.
+This creates `api/meaningsync-local.db`. The file is local runtime data and is ignored by Git.
 
-For complete configuration and startup instructions, see the [Judge Test Guide](docs/judge-test-guide.md).
+### 5. Start the backend and frontend
 
-## Product flow and safety
+Run the backend in one terminal:
 
-`Preferences → Participation → Conversation → Check understanding → Confirm → Receipt`
+```bash
+cd api
+uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
 
-Original words remain immutable evidence. Derived translations have `pending`, `ready`, or `failed` status and never replace the original or become evidence themselves. Agreement and choice comparisons use stable semantic IDs rather than translated strings.
+Run the frontend in a second terminal:
 
-If translation fails, the original statement remains visible and the translation is retryable. Each participant confirms the same agreement-version ID in their chosen language. Mixed-language receipts include English and Hindi term views, original evidence, confirmation bindings, unresolved status, and an integrity hash.
+```bash
+cd web
+npm run dev
+```
 
-### Current limitations
+Open [http://localhost:3000](http://localhost:3000).
 
-- English and Hindi only
-- Translations are useful views but are not guaranteed to be perfect
-- Access credentials authorize an application role but do not verify a person
-- No accounts, signatures, legal enforceability, automatic deletion UI, or participant audio call
-- Separate-device synchronization uses polling rather than full realtime updates
+To confirm that the backend is ready:
 
-## Verification
+```bash
+curl http://localhost:8000/health
+```
 
-Run the complete submission verification from the repository root:
+Expected response:
+
+```json
+{"status":"ok"}
+```
+
+FastAPI's local API documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs).
+
+## Using MeaningSync
+
+### Demo Mode
+
+Select **Try the demo**, choose an English or English/Hindi preset, and follow the prepared conversation. Demo Mode is deterministic: it does not call OpenAI and is safe to repeat while testing the UI.
+
+### Live Mode
+
+1. Select a language for the Customer and Service provider.
+2. Choose INR, USD, or EUR. MeaningSync records the currency but does not convert amounts.
+3. Choose your role and enter an optional display name.
+4. Choose whether both people will share one device or use separate devices.
+5. Type messages or add a reviewed audio transcript.
+6. After both people have contributed, each person marks themselves ready.
+7. The session creator selects **Compare what we mean**.
+8. Review matches, decisions needed, and topics that were not discussed.
+9. Complete any private choices, then confirm separately as each participant.
+10. Create the clarity receipt.
+
+In shared-device mode, pass the screen between participants when prompted. To test separate-device mode on one computer, open the invitation in another browser profile or an incognito window so each role has separate session storage.
+
+### Audio transcription
+
+Audio input requires microphone permission and access to OpenAI Realtime. `http://localhost` works for local development; testing from another physical device requires HTTPS because browsers restrict microphone access on ordinary LAN HTTP pages.
+
+The browser sends an authorized WebRTC SDP offer to FastAPI. FastAPI initializes the transcription-only Realtime call with the server-side OpenAI key and returns only the SDP answer. Participants review or correct the final transcript before adding it to the conversation. MeaningSync does not persist raw audio, SDP, or partial transcript events.
+
+## Data and security boundaries
+
+- The OpenAI project key stays in the backend environment.
+- Responses API analysis and translation use Structured Outputs with `store=false`.
+- Original statements remain the evidence; translations never replace them.
+- Live sessions, credential hashes, invitation hashes, translations, choices, confirmations, and receipts are stored until configured expiry.
+- Role credentials authorize a participant role but do not verify a person's identity.
+- The receipt integrity hash can reveal payload changes, but it is not a signature or trusted timestamp.
+- Automatic expired-data cleanup, user-facing deletion, and backup management are not implemented yet.
+
+See [Privacy and Safety](docs/privacy-and-safety.md) for the complete boundary.
+
+## Testing and verification
+
+Run the deterministic submission checks from the repository root:
 
 ```bash
 ./scripts/verify-submission.sh
 ```
 
-Or run the checks individually:
+Run the complete backend checks:
 
 ```bash
 cd api
 uv run ruff format --check .
 uv run ruff check .
 uv run pytest
+```
 
-cd ../web
+Run the complete frontend checks:
+
+```bash
+cd web
 npm run lint
 npm run type-check
 npm test
 npm run build
 ```
 
-Normal tests use deterministic or fake services and spend no API credits. Paid analysis and transcription tests are opt-in and skipped by default.
+Normal tests use deterministic or fake services and spend no OpenAI credits. Paid integration tests are opt-in and skipped by default.
 
-## How MeaningSync was built with Codex and GPT-5.6
+## Project structure
 
-Codex helped me audit the architecture, implement FastAPI and Next.js changes, build deterministic fixtures, expand regression tests, and iterate on the guided interface for non-technical users.
+```text
+meaning-sync/
+├── api/                 FastAPI application, database migrations, and tests
+│   ├── alembic/         SQL schema migrations
+│   ├── app/             API routes, domain models, repositories, and services
+│   └── tests/           Backend and integration tests
+├── web/                 Next.js application and component tests
+│   ├── public/          Static assets
+│   └── src/             Routes, components, and browser API client
+├── docs/                Product, architecture, API, and safety documentation
+├── scripts/             Demo startup and verification scripts
+└── BUILD_LOG.md         Milestone history and major implementation decisions
+```
 
-I made the core product decisions: preserve original words, keep private answers hidden, avoid inferred confirmation, support shared and separate devices, and call the output a clarity receipt rather than a contract. I used Codex to redesign the earlier questionnaire-like experience into one conversation-first, six-step flow.
+## OpenAI Build Week: Codex and GPT-5.6
 
-GPT-5.6 performs language-independent agreement reasoning through backend-only Responses API Structured Outputs. OpenAI Structured Outputs also support meaning-preserving Live translation through the backend. Realtime transcription supplies a reviewed original-evidence record; it does not produce an AI voice response.
+I built MeaningSync with Codex as my implementation partner. Codex helped me audit the architecture, implement and review the FastAPI and Next.js flows, design deterministic fixtures, expand regression tests, and simplify an earlier questionnaire-style experience into the current six-step conversation flow.
 
-The deterministic English and bilingual Demo modes mirror the important product flow without an API key, microphone, or paid request, allowing judges to evaluate MeaningSync reliably.
+I made the product decisions behind the safety model: preserve original words, hide the first private answer, never infer confirmation, support shared and separate devices, and call the result a clarity receipt rather than a contract. The milestone history is recorded in [BUILD_LOG.md](BUILD_LOG.md).
 
-A detailed milestone-by-milestone record of the Codex collaboration and major product decisions is available in [BUILD_LOG.md](BUILD_LOG.md).
+GPT-5.6 powers Live agreement reasoning and meaning-preserving translation through backend-only Responses API Structured Outputs. The product uses stable semantic IDs and validates model output against trusted participant evidence before showing a result. OpenAI Realtime provides reviewed transcription; it is not used to generate an AI voice response.
+
+The deterministic Demo modes mirror the important experience without an API key or paid request so the product can be tested reliably.
+
+Build Week judges can follow the dedicated [Judge Test Guide](docs/judge-test-guide.md) and use the `v1.0.0-build-week` tag for the frozen submission build.
+
+## Current limitations
+
+- English and Hindi only
+- Machine translations may be imperfect
+- Polling instead of WebSockets for separate-device synchronization
+- No accounts, identity verification, signatures, payments, or legal enforceability
+- No participant-to-participant audio call
+- No automatic cleanup job or user-facing deletion controls
