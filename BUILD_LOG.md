@@ -390,3 +390,20 @@ Verification:
 - ESLint, TypeScript, and all 8 Live session experience tests: passed.
 - Next.js 16.2.10 production build: passed with all 9 application routes.
 - `git diff --check`: passed.
+
+## Shared-Device Translation Display Repair
+
+**Date:** 2026-07-21
+
+- Corrected shared-device Live conversations so the displayed translation language follows the participant currently selected at the composer instead of remaining pinned to the creator credential.
+- Preserved role-bound viewer language on separate devices and original evidence in both modes.
+- Routed translation retries through the standard mutation error handling so network failures are visible instead of becoming unhandled promises.
+- Added focused regression coverage for switching from a Hindi Customer to an English Service provider with a stored ready translation. No OpenAI request was made.
+- Centered the bounded private-handoff card within the wider guided-flow container while retaining full-width behavior on narrow screens.
+
+Verification:
+
+- ESLint and TypeScript: passed.
+- Focused bilingual and Live-session tests: 12 passed.
+- Next.js 16.2.10 production build: passed with all 9 application routes.
+- `git diff --check`: passed.

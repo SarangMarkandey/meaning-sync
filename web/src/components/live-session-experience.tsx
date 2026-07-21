@@ -245,6 +245,16 @@ export function LiveSessionExperience({ sessionId }: { sessionId: string }) {
             onMessage={setMessage}
             onSession={setSession}
             accessToken={tokenFor(composerRole)}
+            onRetryTranslation={(messageId) =>
+              void mutate(() =>
+                api.retryMessageTranslation(
+                  session.id,
+                  messageId,
+                  requestId(),
+                  tokenFor(composerRole),
+                ),
+              )
+            }
             onSend={() => {
               const text = message.trim();
               if (text.length < 2) return;
@@ -429,6 +439,7 @@ function ConversationStep({
   onMessage,
   onSession,
   accessToken,
+  onRetryTranslation,
   onSend,
   onReady,
   onCompare,
@@ -442,6 +453,7 @@ function ConversationStep({
   onMessage: (value: string) => void;
   onSession: (session: LiveSessionView) => void;
   accessToken: string;
+  onRetryTranslation: (messageId: string) => void;
   onSend: () => void;
   onReady: (role: PartyRole, ready: boolean) => void;
   onCompare: () => void;
@@ -459,6 +471,12 @@ function ConversationStep({
   );
   const composerParticipant = session.participants.find((item) => item.role === composerRole);
   const composerLanguage = composerParticipant?.language ?? "en";
+  const preferredRole = separate
+    ? (session.viewer_role ?? composerRole)
+    : composerRole;
+  const preferredLanguage =
+    session.participants.find((item) => item.role === preferredRole)?.language ??
+    "en";
 
   return (
     <section className="guided-task conversation-step" aria-labelledby="conversation-title">
@@ -475,11 +493,10 @@ function ConversationStep({
         </div>
       ) : null}
       <ChatMessageList
-        preferredLanguage={session.participants.find((item) => item.role === (session.viewer_role ?? composerRole))?.language ?? "en"}
-        onRetryTranslation={(messageId) => void api.retryMessageTranslation(session.id, messageId, requestId(), accessToken).then(onSession)}
+        preferredLanguage={preferredLanguage}
+        onRetryTranslation={onRetryTranslation}
         messages={session.messages.map((item) => {
           const speaker = session.participants.find((participant) => participant.id === item.speaker_id);
-          const preferredLanguage = session.participants.find((participant) => participant.role === (session.viewer_role ?? composerRole))?.language ?? "en";
           const translation = item.translations?.[preferredLanguage];
           return {
             id: item.message_id,
@@ -774,7 +791,7 @@ function SharedDeviceNameHandoff({ role, saving, onSubmit }: { role: PartyRole; 
       <LiveBrandBar />
       <section className="guided-flow-page">
         <LiveProgress currentStage="participation" explanation="Each person provides only their own optional display name." />
-        <article className="join-status-card">
+        <article className="join-status-card shared-handoff-card">
           <p className="eyebrow">Private handoff</p>
           <h1>Pass this screen to the {roleLabel(role)}</h1>
           <p>This name is for display only. MeaningSync does not verify identity.</p>

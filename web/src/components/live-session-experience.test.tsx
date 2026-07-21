@@ -91,6 +91,51 @@ describe("LiveSessionExperience conversation-first flow", () => {
     expect(screen.queryByText("Homeowner")).not.toBeInTheDocument();
   });
 
+  it("uses the selected participant language on a shared bilingual device", async () => {
+    const session = conversationSession();
+    session.participation_mode = "same_device";
+    session.viewer_role = "hirer";
+    session.participants = [
+      { id: "hirer", role: "hirer", language: "hi", display_name: "Sarang" },
+      { id: "worker", role: "worker", language: "en", display_name: "Alex" },
+    ];
+    session.messages[0] = {
+      ...session.messages[0],
+      original_text: "मैं पंखे की मरम्मत करवाना चाहता हूँ।",
+      original_language: "hi",
+      translations: {
+        en: {
+          source_language: "hi",
+          target_language: "en",
+          status: "ready",
+          translated_text: "I want the fan repaired.",
+          semantic_equivalence_status: "equivalent",
+          warnings: [],
+          model: "mock-model",
+          prompt_version: "meaning-preserving-translation-v1",
+          fingerprint: "a".repeat(64),
+        },
+      },
+    };
+    vi.spyOn(api, "getLiveSession").mockResolvedValue(session);
+    render(<LiveSessionExperience sessionId="live-guided-v5" />);
+
+    expect(
+      await screen.findByText("मैं पंखे की मरम्मत करवाना चाहता हूँ।"),
+    ).toBeVisible();
+    expect(screen.queryByText("I want the fan repaired.")).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Alex · Service provider" }),
+    );
+
+    expect(screen.getByText("I want the fan repaired.")).toHaveAttribute(
+      "lang",
+      "en",
+    );
+    expect(screen.getByText("Translated view · English")).toBeVisible();
+  });
+
   it("switches between Type and Speak without leaving Conversation", async () => {
     vi.spyOn(api, "getLiveSession").mockResolvedValue(conversationSession());
     render(<LiveSessionExperience sessionId="live-guided-v5" />);
